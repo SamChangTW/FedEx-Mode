@@ -1,0 +1,105 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="theme-color" content="#111827" />
+  <title>FedEx Mode v1.7M-F-W — Web OCR Invoice</title>
+  <link rel="manifest" href="manifest.json">
+  <link rel="stylesheet" href="style.css" />
+  <script>
+    if ('serviceWorker' in navigator) {
+      window.addEventListener('load', () => navigator.serviceWorker.register('./sw.js'));
+    }
+  </script>
+</head>
+<body>
+  <header>
+    <h1>FedEx Web OCR Invoice <small>v1.7M‑F‑W</small></h1>
+    <div class="hint">單一介面：拍照 / OCR / 生成 Invoice（PDF + JSON）｜公版：無 Logo、無簽名</div>
+  </header>
+
+  <main>
+    <section class="card">
+      <h2>1) 匯入影像</h2>
+      <div class="row">
+        <input id="imageInput" type="file" accept="image/*" capture="environment">
+        <button id="btnSample">載入示例圖片</button>
+      </div>
+      <div class="row">
+        <img id="preview" alt="預覽" />
+      </div>
+      <div class="row">
+        <button id="btnOcr">開始 OCR 辨識</button>
+        <progress id="ocrProgress" value="0" max="1"></progress>
+        <span id="ocrStatus"></span>
+      </div>
+      <textarea id="ocrText" placeholder="OCR 原文將顯示於此，供你比對或複製。"></textarea>
+    </section>
+
+    <section class="card">
+      <h2>2) 欄位確認 / 修正</h2>
+      <div class="grid">
+        <label>FedEx AWB No.
+          <input id="awb" placeholder="例如：7721-6500-0095" />
+        </label>
+        <label>Date
+          <input id="date" placeholder="YYYY-MM-DD" />
+        </label>
+        <label>Seller / Exporter
+          <input id="seller" placeholder="公司名稱（賣方）" />
+        </label>
+        <label>Seller Address
+          <input id="sellerAddr" placeholder="賣方地址" />
+        </label>
+        <label>Buyer / Consignee
+          <input id="buyer" placeholder="公司名稱（買方）" />
+        </label>
+        <label>Buyer Address
+          <input id="buyerAddr" placeholder="買方地址" />
+        </label>
+        <label>Incoterms
+          <input id="incoterms" placeholder="如：DAP" />
+        </label>
+        <label>Currency
+          <input id="currency" placeholder="如：USD" />
+        </label>
+      </div>
+
+      <h3>Items（可手動編修，每列一項：描述 | HS(選填) | Qty | UOM | Unit Price）</h3>
+      <textarea id="items" rows="6" placeholder="例：Business Cards | 4911.10.0000 | 1000 | PCS | 0.10&#10;Paperboard Box | 4819.10.0000 | 200 | PCS | 0.50"></textarea>
+
+      <div class="grid three">
+        <label>Freight
+          <input id="freight" type="number" step="0.01" value="0" />
+        </label>
+        <label>Insurance
+          <input id="insurance" type="number" step="0.01" value="0" />
+        </label>
+        <label>Notes (可留空)
+          <input id="notes" />
+        </label>
+      </div>
+    </section>
+
+    <section class="card">
+      <h2>3) 輸出</h2>
+      <div class="row">
+        <button id="btnPdf">生成 PDF</button>
+        <button id="btnJson">下載 JSON</button>
+        <span id="outStatus"></span>
+      </div>
+    </section>
+  </main>
+
+  <footer>
+    <small>Public template v1.7M‑F‑W · 無 Logo / 無簽名 / 無多餘元素 · 可離線（PWA）</small>
+  </footer>
+
+  <!-- Libraries -->
+  <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/pdf-lib@1.17.1/dist/pdf-lib.min.js"></script>
+
+  <script src="app.js"></script>
+</body>
+</html>
