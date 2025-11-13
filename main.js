@@ -26,6 +26,9 @@ const btnRemap = $("btnRemap");
 const btnClear = $("btnClear");
 const btnEnhance = $("btnEnhance");
 const btnRotate = $("btnRotate");
+const useFedExTpl = $("useFedExTpl");
+const tplInput = $("tplInput");
+const tplRow = $("tplRow");
 
 // Camera shortcut
 btnCamera.addEventListener("click", () => {
@@ -33,6 +36,16 @@ btnCamera.addEventListener("click", () => {
   fileInput.click();
   setTimeout(() => fileInput.removeAttribute("capture"), 1000);
 });
+
+// Toggle template row visibility based on checkbox
+if (useFedExTpl && tplRow) {
+  const syncTplRow = () => {
+    tplRow.style.display = useFedExTpl.checked ? 'flex' : 'none';
+  };
+  useFedExTpl.addEventListener('change', syncTplRow);
+  // initialize on load
+  syncTplRow();
+}
 
 fileInput.addEventListener("change", (e) => {
   const file = e.target.files?.[0];
@@ -357,10 +370,76 @@ btnPdf.addEventListener("click", async () => {
   outStatus.textContent = "生成 PDF 中…";
   try {
     const { PDFDocument, StandardFonts, rgb } = PDFLib;
-    const pdf = await PDFDocument.create();
-    const page = pdf.addPage([595.28, 841.89]); // A4
+    let pdf = await PDFDocument.create();
+    let page;
+    const A4 = [595.28, 841.89];
+
+    // If user opts to use the FedEx template as background
+    const wantTpl = useFedExTpl && useFedExTpl.checked;
+
+    // Fonts (prepare upfront)
     const helv = await pdf.embedFont(StandardFonts.Helvetica);
     const bold = await pdf.embedFont(StandardFonts.HelveticaBold);
+
+    // Try to load template (image) and draw as background if requested
+    if (wantTpl) {
+      // Helper to draw background image (PNG/JPG)
+      const drawBackgroundImage = async (bytes, mime) => {
+        const pageLocal = pdf.addPage(A4);
+        let img;
+        if (/png/i.test(mime)) img = await pdf.embedPng(bytes); else img = await pdf.embedJpg(bytes);
+        const pageWidth = A4[0], pageHeight = A4[1];
+        const imgW = img.width, imgH = img.height;
+        const scale = Math.min(pageWidth / imgW, pageHeight / imgH);
+        const drawW = imgW * scale;
+        const drawH = imgH * scale;
+        const offsetX = (pageWidth - drawW) / 2;
+        const offsetY = (pageHeight - drawH) / 2;
+        pageLocal.drawImage(img, { x: offsetX, y: offsetY, width: drawW, height: drawH });
+        return pageLocal;
+      };
+
+      // Source: uploaded file first, else fallback to assets/ci_template.pdf, then assets/ci_template.png
+      let tplBytes = null;
+      let mime = "";
+      if (tplInput && tplInput.files && tplInput.files[0]) {
+        tplBytes = await tplInput.files[0].arrayBuffer();
+        mime = tplInput.files[0].type || "image/png";
+      } else {
+        try {
+          const respPdf = await fetch('assets/ci_template.pdf');
+          if (respPdf.ok) { tplBytes = await respPdf.arrayBuffer(); mime = 'application/pdf'; }
+        } catch {}
+        if (!tplBytes) {
+          try {
+            const respPng = await fetch('assets/ci_template.png');
+            if (respPng.ok) { tplBytes = await respPng.arrayBuffer(); mime = 'image/png'; }
+          } catch {}
+        }
+        if (!tplBytes) {
+          try {
+            const respJpg = await fetch('assets/ci_template.jpg');
+            if (respJpg.ok) { tplBytes = await respJpg.arrayBuffer(); mime = 'image/jpeg'; }
+          } catch {}
+        }
+      }
+
+      if (tplBytes) {
+        if (/application\/pdf/i.test(mime)) {
+          // If template is a PDF, copy its first page directly into our document
+          const tplPdf = await PDFDocument.load(tplBytes);
+          const [tplPage] = await pdf.copyPages(tplPdf, [0]);
+          page = pdf.addPage(tplPage);
+        } else {
+          page = await drawBackgroundImage(tplBytes, mime);
+        }
+      } else {
+        // Fallback to a blank A4 if no template could be loaded
+        page = pdf.addPage(A4);
+      }
+    } else {
+      page = pdf.addPage(A4); // legacy layout branch will draw its own boxes
+    }
 
     // Helper
     const left = 40, right = 555;
@@ -402,6 +481,85 @@ btnPdf.addEventListener("click", async () => {
       return final;
     };
 
+    // If using FedEx template, we skip drawing our legacy boxes and only place text at mapped positions.
+    const usingTemplate = !!(wantTpl);
+    if (usingTemplate) {
+      // Coordinates are initial estimates. They likely need fine-tuning against the actual template image.
+      // Top: AWB and Export Date rows
+      const size = 10;
+
+      // Map A4-based coordinates to actual page coordinates (in case template PDF is not exactly A4)
+      let pw = A4[0], ph = A4[1];
+      try {
+        const sz = page.getSize ? page.getSize() : null;
+        if (sz) { pw = sz.width || pw; ph = sz.height || ph; }
+      } catch {}
+      const sx = pw / A4[0];
+      const sy = ph / A4[1];
+      const mx = (x)=> x * sx;
+      const my = (y)=> y * sy;
+
+      const drawTextM = (t, x, y, s=size, f=helv) => page.drawText(String(t||''), { x: mx(x), y: my(y), size: s, font: f, color: rgb(0,0,0) });
+      const rightAlign = (t, xr, yy, f=helv, s=size)=>{
+        const w = f.widthOfTextAtSize(String(t||''), s);
+        page.drawText(String(t||''), { x: mx(xr) - w, y: my(yy), size: s, font: f, color: rgb(0,0,0) });
+      };
+
+      // AWB
+      drawTextM(String(data.awb||''), 155, 785, size, helv);
+      // Date of Exportation
+      drawTextM(String(data.date||''), 155, 751, size, helv);
+      // Seller (name and address)
+      drawTextM(String(data.seller||''), 55, 716, size, helv);
+      let yy = 700;
+      for (const [i, line] of wrapText(data.sellerAddr, 300, helv, size).entries()) {
+        drawTextM(line, 55, yy - i*12, size, helv);
+      }
+      // Consignee
+      drawTextM(String(data.buyer||''), 360, 716, size, helv);
+      yy = 700;
+      for (const [i, line] of wrapText(data.buyerAddr, 300, helv, size).entries()) {
+        drawTextM(line, 360, yy - i*12, size, helv);
+      }
+
+      // Shipment meta (Weight / Pieces)
+      drawTextM(String(data.weight||''), 475, 785, size, helv);
+      drawTextM(String(data.pieces||''), 520, 785, size, helv);
+
+      // Items table — single-line simplified placement
+      // Description
+      drawTextM(String(data.desc||''), 200, 404, size, helv);
+      // HS code left empty by default
+      // QTY
+      rightAlign(String(data.pieces||''), 420, 404, helv, size);
+      // Unit of measure not available; skipped or map from weight text
+      // Weight (assuming numeric extraction not enforced)
+      rightAlign(String(data.weight||''), 480, 404, helv, size);
+      // Unit Value (currency is dynamic; user said use B/L; we keep numeric amount only)
+      rightAlign(Number.isFinite(data.amount)?data.amount.toFixed(2):String(data.amount||''), 540, 404, helv, size);
+      // Total Value (same as amount in single-item case)
+      rightAlign(Number.isFinite(data.amount)?data.amount.toFixed(2):String(data.amount||''), 585, 404, helv, size);
+
+      // Totals section at lower-right
+      rightAlign(Number.isFinite(data.amount)?data.amount.toFixed(2):String(data.amount||''), 585, 150, helv, size+1);
+
+      // Footer signature fields (name/title/date) left blank for user to fill after print, or we can fill with seller/date
+      drawTextM(String(data.seller||''), 55, 95, size, helv);
+      drawTextM(String(data.date||''), 360, 95, size, helv);
+
+      const bytes = await pdf.save();
+      const blob = new Blob([bytes], {type:"application/pdf"});
+      const fname = `INV_FedEx_${new Date().toISOString().slice(0,10).replace(/-/g,"")}.pdf`;
+      const a = document.createElement("a");
+      a.href = URL.createObjectURL(blob);
+      a.download = fname;
+      a.click();
+      URL.revokeObjectURL(a.href);
+      outStatus.textContent = "PDF 已下載（FedEx 官方版型）。";
+      return;
+    }
+
+    // ===== Legacy layout below (kept as fallback) =====
     // Header title
     txt("COMMERCIAL INVOICE", left, y, bold, 14); y -= 18;
 

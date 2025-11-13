@@ -82,6 +82,15 @@
         <button id="btnPdf" type="button">生成 PDF（制式表格）</button>
         <span id="outStatus"></span>
       </div>
+      <div class="row">
+        <label style="display:flex;align-items:center;gap:8px;">
+          <input id="useFedExTpl" type="checkbox" checked /> 使用 FedEx 官方版型（背景疊字）
+        </label>
+      </div>
+      <div class="row" id="tplRow" style="display:flex;gap:8px;align-items:center;">
+        <input id="tplInput" type="file" accept="image/png, image/jpeg, application/pdf" />
+        <small>可上傳模板（PDF/PNG/JPG）。若留空，將嘗試載入 assets/ci_template.pdf 或 assets/ci_template.png</small>
+      </div>
     </section>
   </main>
 
