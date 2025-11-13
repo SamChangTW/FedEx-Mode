@@ -1,9 +1,9 @@
 {
-  "name": "FedEx Web OCR Invoice",
-  "short_name": "FedEx OCR",
+  "name": "FedEx 模式 OCR 商業發票",
+  "short_name": "FedEx OCR Invoice",
   "start_url": ".",
   "display": "standalone",
-  "background_color": "#0b0e13",
-  "theme_color": "#0b0e13",
+  "background_color": "#ffffff",
+  "theme_color": "#11141a",
   "icons": []
 }
