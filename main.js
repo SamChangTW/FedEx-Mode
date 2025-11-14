@@ -157,6 +157,16 @@ async function runOcr(source, opts={}){
     const localLang = qs.get('localLang') === '1';
     const explicitLangPath = qs.get('langPath'); // 允許直接指定完整 base URL
 
+    // 將任意（相對/絕對）路徑正規化為相對當前頁面的「絕對 URL」，避免在 Worker 內被當作相對 worker 的路徑
+    const makeAbs = (u) => {
+      try {
+        // 若已是絕對 URL，new URL 會直接回傳；若是相對，會以 location.href 作為 base
+        return new URL(u, location.href).toString().replace(/\/$/, '');
+      } catch {
+        try { return new URL(String(u||''), location.href).toString().replace(/\/$/, ''); } catch { return String(u||''); }
+      }
+    };
+
     // 測 core wasm
     let ok = await probe(paths.corePath);
     if (!ok){
@@ -177,11 +187,14 @@ async function runOcr(source, opts={}){
     }
     // 準備語言包候選清單
     const langCandidates = [];
-    if (explicitLangPath) langCandidates.push(explicitLangPath);
-    if (localLang) langCandidates.push('./assets/tessdata');
-    // 既有路徑先檢查
-    langCandidates.push(paths.langPath);
-    for (const m of MIRRORS.langPath){ if (!langCandidates.includes(m)) langCandidates.push(m); }
+    if (explicitLangPath) langCandidates.push(makeAbs(explicitLangPath));
+    if (localLang) langCandidates.push(makeAbs('./assets/tessdata'));
+    // 既有路徑先檢查（正規化為絕對 URL）
+    langCandidates.push(makeAbs(paths.langPath));
+    for (const m of MIRRORS.langPath){
+      const abs = makeAbs(m);
+      if (!langCandidates.includes(abs)) langCandidates.push(abs);
+    }
 
     // 逐一探測語言包（eng）並切換；優先檢查 .traineddata.gz，其次才檢查未壓縮（不建議）
     let chosen = null;
@@ -194,7 +207,8 @@ async function runOcr(source, opts={}){
       if (ok){ chosen = baseTrim; useGz = true; break; }
 
       // 僅在同源（localLang）路徑上允許退而求其次使用未壓縮，避免 v5 預設抓 .gz 造成失敗
-      const isLocal = baseTrim.startsWith('./') || baseTrim.startsWith(self?.registration?.scope||'___NOPE___');
+      let isLocal = false;
+      try { isLocal = new URL(baseTrim).origin === location.origin; } catch { isLocal = false; }
       if (isLocal){
         const rawUrl = `${baseTrim}/eng.traineddata`;
         ocrStatus.textContent = `語言資料來源測試（raw）…\n→ 嘗試：${rawUrl}`;
@@ -203,6 +217,7 @@ async function runOcr(source, opts={}){
       }
     }
     if (chosen){
+      // 重要：傳入 worker 的 langPath 一律使用絕對 URL，避免在 worker 端被誤解為相對於 worker 的路徑
       paths.langPath = chosen;
       paths.langGz = useGz;
       const suffix = useGz ? 'eng.traineddata.gz' : 'eng.traineddata';
