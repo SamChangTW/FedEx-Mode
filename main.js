@@ -65,14 +65,23 @@ btnOcr.addEventListener("click", async () => {
   ocrProgress.value = 0;
 
   try {
-    const { text, confidence } = await runOcr(file ? file : preview.src);
-    ocrText.value = text || "";
-    if (text) {
-      ocrStatus.textContent = `完成（信心 ${Number(confidence||0).toFixed(1)}）`;
+    // 若開啟分區 OCR（zonal=1），改走專屬流程
+    const qs = new URLSearchParams(location.search);
+    const useZonal = qs.get('zonal') === '1';
+    if (useZonal) {
+      const res = await zonalOcr(file ? file : preview.src);
+      ocrText.value = res.debugText || '';
+      ocrStatus.textContent = res.statusText || '完成（分區）';
     } else {
-      ocrStatus.textContent = "完成，但未擷取到文字。";
+      const { text, confidence } = await runOcr(file ? file : preview.src);
+      ocrText.value = text || "";
+      if (text) {
+        ocrStatus.textContent = `完成（信心 ${Number(confidence||0).toFixed(1)}）`;
+      } else {
+        ocrStatus.textContent = "完成，但未擷取到文字。";
+      }
+      autoMap(ocrText.value || "");
     }
-    autoMap(ocrText.value || "");
   } catch (err) {
     console.error(err);
     const msg = (err && (err.message || err.toString())) || '';
@@ -466,6 +475,148 @@ function rotateCanvas(canvas, deg){
   ctx.rotate(rad);
   ctx.drawImage(canvas, -w/2, -h/2);
   return out;
+}
+
+// ==== 分區（Zonal）OCR 支援：依固定 ROI 擷取關鍵欄位 ====
+// ROI 以百分比定義（相對整張圖）：{ x, y, w, h }，單位 0–100
+const ZONAL_ROIS = {
+  // 高可靠
+  awb:   { x: 7,  y: 54, w: 60, h: 6,  psm: 7, whitelist: '0123456789 ' },
+  ship:  { x: 62, y: 6,  w: 30, h: 8,  psm: 7 }, // SHIP DATE / ACT WGT 同框
+  toBlk: { x: 6,  y: 19, w: 70, h: 22, psm: 6 },
+  desc1: { x: 7,  y: 63, w: 50, h: 14, psm: 6 },
+  customs:{x: 7,  y: 79, w: 46, h: 7,  psm: 6 },
+  // 低可靠（寄件人）
+  origin:{ x: 5,  y: 5,  w: 46, h: 14, psm: 6 }
+};
+
+// 將百分比 ROI 轉為實際像素並裁切
+async function cropRoiToDataURL(src, roi){
+  const { canvas } = await loadImageToCanvas(src);
+  const w = canvas.width, h = canvas.height;
+  const rx = Math.round((roi.x/100) * w);
+  const ry = Math.round((roi.y/100) * h);
+  const rw = Math.round((roi.w/100) * w);
+  const rh = Math.round((roi.h/100) * h);
+  const out = document.createElement('canvas');
+  out.width = rw; out.height = rh;
+  const ctx = out.getContext('2d');
+  ctx.drawImage(canvas, rx, ry, rw, rh, 0, 0, rw, rh);
+  return { url: out.toDataURL('image/png'), rect: { x: rx, y: ry, w: rw, h: rh }, base: { w, h } };
+}
+
+function normalizeDateLike(s){
+  if (!s) return '';
+  // YYYY-MM-DD / YYYY/MM/DD
+  let m = s.match(/\b(\d{4})[-\/.](\d{1,2})[-\/.](\d{1,2})\b/);
+  if (m){ const pad=n=>String(n).padStart(2,'0'); return `${m[1]}-${pad(m[2])}-${pad(m[3])}`; }
+  // DD-MMM-YY / 13NOV25
+  m = s.match(/\b(\d{1,2})\s*(JAN|FEB|MAR|APR|MAY|JUN|JUL|AUG|SEP|OCT|NOV|DEC)[A-Z]*\s*(\d{2,4})\b/i);
+  if (m){
+    const d = parseInt(m[1],10);
+    const mon = m[2].toUpperCase().slice(0,3);
+    const months = {JAN:1,FEB:2,MAR:3,APR:4,MAY:5,JUN:6,JUL:7,AUG:8,SEP:9,OCT:10,NOV:11,DEC:12};
+    const mm = months[mon]||1; let yy = parseInt(m[3],10); if (yy<100) yy = yy<=50?2000+yy:1900+yy;
+    const pad=n=>String(n).padStart(2,'0'); return `${yy}-${pad(mm)}-${pad(d)}`;
+  }
+  return '';
+}
+
+function extractAmountUSD(s){
+  const m = s.match(/CUSTOMS\s*VALUE[:\s]*\$?\s*([\d,]+(?:\.[\d]{1,2})?)/i) || s.match(/\$?\s*([\d,]+(?:\.[\d]{1,2})?)\s*USD/i);
+  return m ? m[1].replace(/,/g,'') : '';
+}
+
+function extractWeight(s){
+  const m = s.match(/(?:ACT\s*WGT|WT|WEIGHT)\s*[:\-]?\s*([\d.,]+)\s*(KG|KGS?|G|GRAMS?|LB|LBS?)\b/i);
+  if (!m) return '';
+  const num = m[1].replace(/,/g,'');
+  const unit = m[2].toUpperCase().replace(/S$/,'');
+  return `${num} ${unit}`;
+}
+
+function awbPostprocess(s){
+  if (!s) return '';
+  const digits = s.replace(/\D/g,'');
+  const m = digits.match(/\d{12,14}/);
+  return m ? m[0] : (digits.length?digits.slice(0,14):'');
+}
+
+async function zonalOcr(src){
+  const qs = new URLSearchParams(location.search);
+  const showRoi = qs.get('showRoi') === '1';
+  let debugParts = [];
+
+  // 1) AWB
+  let r = await cropRoiToDataURL(src, ZONAL_ROIS.awb);
+  let o = await runOcr(r.url, { psm: ZONAL_ROIS.awb.psm, whitelist: ZONAL_ROIS.awb.whitelist });
+  debugParts.push(`[AWB]\n${o.text}`);
+  awb.value = awbPostprocess(o.text||'');
+
+  // 2) SHIP/WT 框
+  r = await cropRoiToDataURL(src, ZONAL_ROIS.ship);
+  o = await runOcr(r.url, { psm: ZONAL_ROIS.ship.psm });
+  debugParts.push(`\n[SHIP/WT]\n${o.text}`);
+  const dateNorm = normalizeDateLike(o.text||'');
+  if (dateNorm) dateEl.value = dateNorm;
+  const wt = extractWeight(o.text||'');
+  if (wt) weight.value = wt;
+
+  // 3) TO 區塊（收件人）
+  r = await cropRoiToDataURL(src, ZONAL_ROIS.toBlk);
+  o = await runOcr(r.url, { psm: ZONAL_ROIS.toBlk.psm });
+  debugParts.push(`\n[TO]\n${o.text}`);
+  const toLines = (o.text||'').split(/\r?\n/).map(s=>s.trim()).filter(Boolean);
+  if (toLines.length){
+    buyer.value = toLines.slice(0,2).join(' ').trim();
+    buyerAddr.value = toLines.slice(2).join('\n');
+  }
+
+  // 4) DESC1
+  r = await cropRoiToDataURL(src, ZONAL_ROIS.desc1);
+  o = await runOcr(r.url, { psm: ZONAL_ROIS.desc1.psm });
+  debugParts.push(`\n[DESC]\n${o.text}`);
+  const mDesc = (o.text||'').match(/^[A-Z ]*:?\s*(.+)$/i);
+  if (mDesc) desc.value = mDesc[1].trim();
+
+  // 5) CUSTOMS VALUE → 金額
+  r = await cropRoiToDataURL(src, ZONAL_ROIS.customs);
+  o = await runOcr(r.url, { psm: ZONAL_ROIS.customs.psm });
+  debugParts.push(`\n[CUSTOMS]\n${o.text}`);
+  const amt = extractAmountUSD(o.text||'');
+  if (amt) amount.value = amt;
+
+  // 6) ORIGIN（寄件人）
+  r = await cropRoiToDataURL(src, ZONAL_ROIS.origin);
+  o = await runOcr(r.url, { psm: ZONAL_ROIS.origin.psm });
+  debugParts.push(`\n[ORIGIN]\n${o.text}`);
+  const orgLines = (o.text||'').split(/\r?\n/).map(s=>s.trim()).filter(Boolean);
+  if (orgLines.length){
+    seller.value = orgLines.slice(0,2).join(' ').trim();
+    sellerAddr.value = orgLines.slice(2).join('\n');
+  }
+
+  // Optional: ROI 覆蓋示意
+  if (showRoi){
+    const { canvas } = await loadImageToCanvas(src);
+    const ctx = canvas.getContext('2d');
+    ctx.strokeStyle = 'rgba(255,0,0,0.9)';
+    ctx.lineWidth = 3;
+    ctx.fillStyle = 'rgba(255,0,0,0.15)';
+    Object.values(ZONAL_ROIS).forEach(roi=>{
+      const x = (roi.x/100)*canvas.width;
+      const y = (roi.y/100)*canvas.height;
+      const w = (roi.w/100)*canvas.width;
+      const h = (roi.h/100)*canvas.height;
+      ctx.fillRect(x,y,w,h); ctx.strokeRect(x,y,w,h);
+    });
+    try { preview.src = canvas.toDataURL('image/jpeg', 0.92); } catch {}
+  }
+
+  // 彙整狀態
+  const dbg = debugParts.join('\n');
+  const statusText = '完成（分區 OCR）';
+  return { debugText: dbg, statusText };
 }
 
 // Enhance button: preprocess + multi-rotation OCR, choose best
