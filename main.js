@@ -89,10 +89,75 @@ btnOcr.addEventListener("click", async () => {
 async function runOcr(source, opts={}){
   // 明確指定 Tesseract 各組件路徑，避免在 PWA/行動裝置上載入失敗
   const t5 = 'https://cdn.jsdelivr.net/npm/tesseract.js@5/dist';
+  // 多鏡像來源（主用 jsDelivr → 次用 unpkg；語言包提供 jsDelivr 的 naptha/tessdata 鏡像）
+  const MIRRORS = {
+    workerPath: [
+      `${t5}/worker.min.js`,
+      'https://unpkg.com/tesseract.js@5/dist/worker.min.js'
+    ],
+    corePath: [
+      'https://cdn.jsdelivr.net/npm/tesseract.js-core@5/tesseract-core.wasm.js',
+      'https://unpkg.com/tesseract.js-core@5.0.0/tesseract-core.wasm.js'
+    ],
+    langPath: [
+      'https://tessdata.projectnaptha.com/4.0.0',
+      'https://cdn.jsdelivr.net/gh/naptha/tessdata@gh-pages/4.0.0'
+    ]
+  };
+
+  // 目前選用的路徑（可被鏡像切換覆寫）
   const paths = {
-    workerPath: `${t5}/worker.min.js`,
-    corePath: 'https://cdn.jsdelivr.net/npm/tesseract.js-core@5/tesseract-core.wasm.js',
-    langPath: 'https://tessdata.projectnaptha.com/4.0.0',
+    workerPath: MIRRORS.workerPath[0],
+    corePath: MIRRORS.corePath[0],
+    langPath: MIRRORS.langPath[0],
+  };
+
+  // 小工具：加上逾時保護，避免永久卡住
+  const withTimeout = (p, ms, label) => Promise.race([
+    p,
+    new Promise((_, rej) => setTimeout(() => rej(new Error(`${label} 逾時（>${ms}ms）`)), ms))
+  ]);
+
+  // 小工具：快速探測某 URL 可否連通
+  const probe = async (url, ms = 6000) => {
+    try {
+      const ctrl = new AbortController();
+      const id = setTimeout(()=>ctrl.abort(), ms);
+      const resp = await fetch(url, { method: 'HEAD', mode: 'cors', signal: ctrl.signal });
+      clearTimeout(id);
+      return resp.ok;
+    } catch { return false; }
+  };
+
+  // 於初始化前先測試可用性，失敗則嘗試鏡像
+  const ensureAccessible = async () => {
+    // 測 core wasm
+    let ok = await probe(paths.corePath);
+    if (!ok){
+      for (const alt of MIRRORS.corePath){
+        if (alt === paths.corePath) continue;
+        ocrStatus.textContent = 'OCR 核心連線不穩，切換鏡像來源（core）…';
+        if (await probe(alt)) { paths.corePath = alt; break; }
+      }
+    }
+    // 測 worker
+    ok = await probe(paths.workerPath);
+    if (!ok){
+      for (const alt of MIRRORS.workerPath){
+        if (alt === paths.workerPath) continue;
+        ocrStatus.textContent = 'OCR 元件連線不穩，切換鏡像來源（worker）…';
+        if (await probe(alt)) { paths.workerPath = alt; break; }
+      }
+    }
+    // 測語言包（eng）
+    ok = await probe(`${paths.langPath.replace(/\/$/, '')}/eng.traineddata`);
+    if (!ok){
+      for (const alt of MIRRORS.langPath){
+        if (alt === paths.langPath) continue;
+        ocrStatus.textContent = '語言資料連線不穩，切換鏡像來源（eng）…';
+        if (await probe(`${alt.replace(/\/$/, '')}/eng.traineddata`)) { paths.langPath = alt; break; }
+      }
+    }
   };
 
   // 兼容不同打包輸出（部分環境 Tesseract 掛在 default）
@@ -102,6 +167,8 @@ async function runOcr(source, opts={}){
 
   // 嘗試以 worker 模式執行（效能較佳）
   try {
+    // 預檢可連性，避免後續無限等待
+    await ensureAccessible();
     const createWorker = T && (T.createWorker || T.default?.createWorker);
     if (!createWorker) throw new Error('Tesseract.createWorker 不存在');
 
@@ -112,10 +179,10 @@ async function runOcr(source, opts={}){
       throw new Error('worker.load 不是函式，可能載入了不匹配的 tesseract.min.js（快取未更新）');
     }
 
-    await worker.load();
+    await withTimeout(worker.load(), 15000, '載入 OCR Worker');
     ocrStatus.textContent = '下載語言資料（eng）…';
-    await worker.loadLanguage('eng');
-    await worker.initialize('eng');
+    await withTimeout(worker.loadLanguage('eng'), 25000, '下載語言資料');
+    await withTimeout(worker.initialize('eng'), 10000, '初始化語言（eng）');
     if (opts.psm) await worker.setParameters({ tessedit_pageseg_mode: String(opts.psm) });
     if (opts.whitelist) await worker.setParameters({ tessedit_char_whitelist: opts.whitelist });
 
@@ -137,15 +204,21 @@ async function runOcr(source, opts={}){
       throw initErr; // 無法降級，只能把錯拋出給上層處理
     }
     const recognize = (T.recognize || T.default?.recognize).bind(T);
-    const { data } = await recognize(source, 'eng', {
-      ...paths,
-      logger: m => {
-        if (m.status === 'recognizing text') {
-          ocrProgress.value = m.progress || 0;
-          ocrStatus.textContent = `辨識中… ${(m.progress*100).toFixed(0)}%`;
+    // 再次確保鏡像切換已完成
+    await ensureAccessible();
+    const { data } = await withTimeout(
+      recognize(source, 'eng', {
+        ...paths,
+        logger: m => {
+          if (m.status === 'recognizing text') {
+            ocrProgress.value = m.progress || 0;
+            ocrStatus.textContent = `辨識中… ${(m.progress*100).toFixed(0)}%`;
+          }
         }
-      }
-    });
+      }),
+      40000,
+      '快速辨識'
+    );
     return { text: data.text || '', confidence: data.confidence };
   }
 }
