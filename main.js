@@ -85,34 +85,69 @@ btnOcr.addEventListener("click", async () => {
   }
 });
 
-// Core OCR runner with basic config and progress logger
+// Core OCR runner with robust worker initialization and diagnostics
 async function runOcr(source, opts={}){
   // 明確指定 Tesseract 各組件路徑，避免在 PWA/行動裝置上載入失敗
   const t5 = 'https://cdn.jsdelivr.net/npm/tesseract.js@5/dist';
-  // 注意：在部分版本/打包情況下，createWorker 會回傳 Promise，需 await
-  const worker = await Tesseract.createWorker({
+  const paths = {
     workerPath: `${t5}/worker.min.js`,
     corePath: 'https://cdn.jsdelivr.net/npm/tesseract.js-core@5/tesseract-core.wasm.js',
-    // 使用公開英文字語料（如需中英混合再另行加入）
     langPath: 'https://tessdata.projectnaptha.com/4.0.0',
-  });
-  ocrStatus.textContent = '載入 OCR 元件…';
-  await worker.load();
-  ocrStatus.textContent = '下載語言資料（eng）…';
-  await worker.loadLanguage('eng');
-  await worker.initialize('eng');
-  if (opts.psm) await worker.setParameters({ tessedit_pageseg_mode: String(opts.psm) });
-  if (opts.whitelist) await worker.setParameters({ tessedit_char_whitelist: opts.whitelist });
-  const { data } = await worker.recognize(source, {
-    logger: m => {
-      if (m.status === 'recognizing text') {
-        ocrProgress.value = m.progress || 0;
-        ocrStatus.textContent = `辨識中… ${(m.progress*100).toFixed(0)}%`;
-      }
+  };
+
+  // 兼容不同打包輸出（部分環境 Tesseract 掛在 default）
+  const T = (window.Tesseract && (window.Tesseract.default || window.Tesseract)) || undefined;
+  const ver = (T && (T.version || T.default?.version)) || (window.Tesseract && window.Tesseract.version) || '';
+  ocrStatus.textContent = `載入 OCR 元件…${ver ? ` (tesseract.js ${ver})` : ''}`;
+
+  // 嘗試以 worker 模式執行（效能較佳）
+  try {
+    const createWorker = T && (T.createWorker || T.default?.createWorker);
+    if (!createWorker) throw new Error('Tesseract.createWorker 不存在');
+
+    let worker = createWorker.call(T, paths);
+    // 某些版本會回傳 Promise
+    if (worker && typeof worker.then === 'function') worker = await worker;
+    if (!worker || typeof worker.load !== 'function') {
+      throw new Error('worker.load 不是函式，可能載入了不匹配的 tesseract.min.js（快取未更新）');
     }
-  });
-  await worker.terminate();
-  return { text: data.text || "", confidence: data.confidence };
+
+    await worker.load();
+    ocrStatus.textContent = '下載語言資料（eng）…';
+    await worker.loadLanguage('eng');
+    await worker.initialize('eng');
+    if (opts.psm) await worker.setParameters({ tessedit_pageseg_mode: String(opts.psm) });
+    if (opts.whitelist) await worker.setParameters({ tessedit_char_whitelist: opts.whitelist });
+
+    const { data } = await worker.recognize(source, {
+      logger: m => {
+        if (m.status === 'recognizing text') {
+          ocrProgress.value = m.progress || 0;
+          ocrStatus.textContent = `辨識中… ${(m.progress*100).toFixed(0)}%`;
+        }
+      }
+    });
+    await worker.terminate();
+    return { text: data.text || '', confidence: data.confidence };
+  } catch (initErr) {
+    // 記錄並嘗試降級為單次 recognize（非持久 worker），以提升容錯率
+    console.warn('[OCR] Worker 初始化失敗，改用單次 recognize：', initErr);
+    ocrStatus.textContent = 'OCR Worker 初始化失敗，改用快速路徑…';
+    if (!T || typeof (T.recognize || T.default?.recognize) !== 'function') {
+      throw initErr; // 無法降級，只能把錯拋出給上層處理
+    }
+    const recognize = (T.recognize || T.default?.recognize).bind(T);
+    const { data } = await recognize(source, 'eng', {
+      ...paths,
+      logger: m => {
+        if (m.status === 'recognizing text') {
+          ocrProgress.value = m.progress || 0;
+          ocrStatus.textContent = `辨識中… ${(m.progress*100).toFixed(0)}%`;
+        }
+      }
+    });
+    return { text: data.text || '', confidence: data.confidence };
+  }
 }
 
 // Canvas helpers: load image to canvas
