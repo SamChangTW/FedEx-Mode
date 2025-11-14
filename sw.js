@@ -11,7 +11,7 @@ self.addEventListener('install',e=>{
     const c = await caches.open(CACHE);
     // 核心資產（必備）
     await c.addAll(ASSETS);
-    // 選配資產：語言包（若站點有提供 /assets/tessdata/eng.traineddata 則快取，否則忽略）
+    // 選配資產：語言包（若站點有提供則快取，否則忽略）
     try {
       const url = new URL('./assets/tessdata/eng.traineddata', self.registration.scope);
       const resp = await fetch(url.toString(), { method: 'HEAD', cache: 'no-store' });
@@ -20,6 +20,15 @@ self.addEventListener('install',e=>{
         const full = new URL('./assets/tessdata/eng.traineddata', self.registration.scope).toString();
         const blobResp = await fetch(full, { cache: 'no-store' });
         if (blobResp.ok) await c.put(full, blobResp.clone());
+      }
+    } catch(_){}
+    try {
+      const urlgz = new URL('./assets/tessdata/eng.traineddata.gz', self.registration.scope);
+      const respgz = await fetch(urlgz.toString(), { method: 'HEAD', cache: 'no-store' });
+      if (respgz.ok) {
+        const fullgz = new URL('./assets/tessdata/eng.traineddata.gz', self.registration.scope).toString();
+        const blobRespgz = await fetch(fullgz, { cache: 'no-store' });
+        if (blobRespgz.ok) await c.put(fullgz, blobRespgz.clone());
       }
     } catch(_){}
   })());
