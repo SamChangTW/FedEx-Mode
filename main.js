@@ -89,7 +89,8 @@ btnOcr.addEventListener("click", async () => {
 async function runOcr(source, opts={}){
   // 明確指定 Tesseract 各組件路徑，避免在 PWA/行動裝置上載入失敗
   const t5 = 'https://cdn.jsdelivr.net/npm/tesseract.js@5/dist';
-  const worker = Tesseract.createWorker({
+  // 注意：在部分版本/打包情況下，createWorker 會回傳 Promise，需 await
+  const worker = await Tesseract.createWorker({
     workerPath: `${t5}/worker.min.js`,
     corePath: 'https://cdn.jsdelivr.net/npm/tesseract.js-core@5/tesseract-core.wasm.js',
     // 使用公開英文字語料（如需中英混合再另行加入）

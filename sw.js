@@ -1,4 +1,4 @@
-const CACHE='fedex-ocr-r2';
+const CACHE='fedex-ocr-r3';
 const ASSETS=[
   './','./index.html','./style.css','./main.js','./manifest.json',
   './assets/fedex-commercial-invoice-form-tw.pdf',
