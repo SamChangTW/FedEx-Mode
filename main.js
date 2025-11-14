@@ -96,6 +96,9 @@ btnOcr.addEventListener("click", async () => {
 
 // Core OCR runner with robust worker initialization and diagnostics
 async function runOcr(source, opts={}){
+  // 自訂語言（預設 eng；可用 ?lang=eng+chi_tra 覆寫）
+  const qsLang = new URLSearchParams(location.search);
+  const LANGS = (qsLang.get('lang') || 'eng').trim();
   // 明確指定 Tesseract 各組件路徑，避免在 PWA/行動裝置上載入失敗
   const t5 = 'https://cdn.jsdelivr.net/npm/tesseract.js@5/dist';
   // 多鏡像來源（主用 jsDelivr → 次用 unpkg；語言包提供 jsDelivr 的 naptha/tessdata 鏡像）
@@ -286,7 +289,7 @@ async function runOcr(source, opts={}){
     await ensureAccessible();
     const recognize = (T.recognize || T.default?.recognize).bind(T);
     ocrStatus.textContent = '使用快速路徑（無 worker）…';
-    const { data } = await withTimeout(recognize(source, 'eng', {
+    const { data } = await withTimeout(recognize(source, LANGS, {
       workerPath: paths.workerPath,
       corePath: paths.corePath,
       langPath: paths.langPath,
@@ -337,8 +340,9 @@ async function runOcr(source, opts={}){
     await withTimeout(worker.load(), 15000, '載入 OCR Worker');
     const tryLoadLanguage = async (gzipMode) => {
       const suffix = gzipMode===false ? 'eng.traineddata' : 'eng.traineddata.gz';
-      ocrStatus.textContent = `下載語言資料（eng）…\n來源：${paths.langPath.replace(/\/$/, '')}/${suffix}`;
-      await withTimeout(worker.loadLanguage('eng'), 30000, '下載語言資料');
+      ocrStatus.textContent = `下載語言資料（${LANGS}）…\n來源：${paths.langPath.replace(/\/$/, '')}/${suffix}\n提示：best 模型較大，首次可能需 30–60 秒`;
+      const langTimeout = (isLocalOrigin && gzipMode===false) ? 60000 : 30000;
+      await withTimeout(worker.loadLanguage(LANGS), langTimeout, '下載語言資料');
     };
 
     try {
@@ -358,7 +362,7 @@ async function runOcr(source, opts={}){
         throw e;
       }
     }
-    await withTimeout(worker.initialize('eng'), 10000, '初始化語言（eng）');
+    await withTimeout(worker.initialize(LANGS), 10000, `初始化語言（${LANGS}）`);
     if (opts.psm) await worker.setParameters({ tessedit_pageseg_mode: String(opts.psm) });
     if (opts.whitelist) await worker.setParameters({ tessedit_char_whitelist: opts.whitelist });
 
@@ -383,7 +387,7 @@ async function runOcr(source, opts={}){
     // 再次確保鏡像切換已完成
     await ensureAccessible();
     const { data } = await withTimeout(
-      recognize(source, 'eng', {
+      recognize(source, LANGS, {
         ...paths,
         logger: m => {
           if (m.status === 'recognizing text') {

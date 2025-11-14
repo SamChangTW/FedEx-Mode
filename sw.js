@@ -1,4 +1,4 @@
-const CACHE='fedex-ocr-r8';
+const CACHE='fedex-ocr-r9';
 const ASSETS=[
   './','./index.html','./style.css','./main.js','./manifest.json',
   './assets/fedex-commercial-invoice-form-tw.pdf'
@@ -31,6 +31,25 @@ self.addEventListener('install',e=>{
         if (blobRespgz.ok) await c.put(fullgz, blobRespgz.clone());
       }
     } catch(_){}
+    // 可選：繁中語言包（若存在則快取）
+    try {
+      const urlChi = new URL('./assets/tessdata/chi_tra.traineddata', self.registration.scope);
+      const respChi = await fetch(urlChi.toString(), { method: 'HEAD', cache: 'no-store' });
+      if (respChi.ok) {
+        const fullChi = new URL('./assets/tessdata/chi_tra.traineddata', self.registration.scope).toString();
+        const blobRespChi = await fetch(fullChi, { cache: 'no-store' });
+        if (blobRespChi.ok) await c.put(fullChi, blobRespChi.clone());
+      }
+    } catch(_){ }
+    try {
+      const urlChiGz = new URL('./assets/tessdata/chi_tra.traineddata.gz', self.registration.scope);
+      const respChiGz = await fetch(urlChiGz.toString(), { method: 'HEAD', cache: 'no-store' });
+      if (respChiGz.ok) {
+        const fullChiGz = new URL('./assets/tessdata/chi_tra.traineddata.gz', self.registration.scope).toString();
+        const blobRespChiGz = await fetch(fullChiGz, { cache: 'no-store' });
+        if (blobRespChiGz.ok) await c.put(fullChiGz, blobRespChiGz.clone());
+      }
+    } catch(_){ }
   })());
 });
 
