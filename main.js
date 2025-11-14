@@ -100,8 +100,13 @@ async function runOcr(source, opts={}){
       'https://unpkg.com/tesseract.js-core@5.0.0/tesseract-core.wasm.js'
     ],
     langPath: [
+      // Primary (Naptha official mirrors)
       'https://tessdata.projectnaptha.com/4.0.0',
-      'https://cdn.jsdelivr.net/gh/naptha/tessdata@gh-pages/4.0.0'
+      'https://cdn.jsdelivr.net/gh/naptha/tessdata@gh-pages/4.0.0',
+      // Additional fallbacks (GitHub raw — often可達，但 HEAD 可能被擋，稍後以 GET 探測)
+      'https://raw.githubusercontent.com/tesseract-ocr/tessdata_fast/4.0.0',
+      'https://raw.githubusercontent.com/tesseract-ocr/tessdata/4.0.0',
+      'https://raw.githubusercontent.com/tesseract-ocr/tessdata_best/4.0.0'
     ]
   };
 
@@ -118,26 +123,47 @@ async function runOcr(source, opts={}){
     new Promise((_, rej) => setTimeout(() => rej(new Error(`${label} 逾時（>${ms}ms）`)), ms))
   ]);
 
-  // 小工具：快速探測某 URL 可否連通
-  const probe = async (url, ms = 6000) => {
-    try {
-      const ctrl = new AbortController();
-      const id = setTimeout(()=>ctrl.abort(), ms);
-      const resp = await fetch(url, { method: 'HEAD', mode: 'cors', signal: ctrl.signal });
-      clearTimeout(id);
-      return resp.ok;
-    } catch { return false; }
+  // 小工具：快速探測某 URL 可否連通（先 HEAD，不行再 GET，並加入重試）
+  const probe = async (url, ms = 6000, attempts = 2) => {
+    const tryOnce = async (timeoutMs) => {
+      // 1) HEAD（較省流量，但某些 CDN/防火牆會擋）
+      try {
+        const ctrl = new AbortController();
+        const id = setTimeout(()=>ctrl.abort(), timeoutMs);
+        const resp = await fetch(url, { method: 'HEAD', mode: 'cors', cache: 'no-store', redirect: 'follow', signal: ctrl.signal });
+        clearTimeout(id);
+        if (resp.ok) return true;
+      } catch {}
+      // 2) GET（允許 3xx → 200，並快速中止）
+      try {
+        const ctrl2 = new AbortController();
+        const id2 = setTimeout(()=>ctrl2.abort(), Math.max(2000, Math.floor(timeoutMs*0.8)));
+        const resp2 = await fetch(url, { method: 'GET', mode: 'cors', cache: 'no-store', redirect: 'follow', signal: ctrl2.signal });
+        clearTimeout(id2);
+        return resp2.ok;
+      } catch {}
+      return false;
+    };
+    for (let i=0;i<attempts;i++){
+      const ok = await tryOnce(ms + i*1500); // 簡單 backoff
+      if (ok) return true;
+    }
+    return false;
   };
 
   // 於初始化前先測試可用性，失敗則嘗試鏡像
   const ensureAccessible = async () => {
+    const qs = new URLSearchParams(location.search);
+    const localLang = qs.get('localLang') === '1';
+    const explicitLangPath = qs.get('langPath'); // 允許直接指定完整 base URL
+
     // 測 core wasm
     let ok = await probe(paths.corePath);
     if (!ok){
       for (const alt of MIRRORS.corePath){
         if (alt === paths.corePath) continue;
-        ocrStatus.textContent = 'OCR 核心連線不穩，切換鏡像來源（core）…';
-        if (await probe(alt)) { paths.corePath = alt; break; }
+        ocrStatus.textContent = `OCR 核心連線不穩，切換鏡像來源（core）…\n→ 嘗試：${alt}`;
+        if (await probe(alt)) { paths.corePath = alt; ocrStatus.textContent = `已切換核心來源：${alt}`; break; }
       }
     }
     // 測 worker
@@ -145,18 +171,33 @@ async function runOcr(source, opts={}){
     if (!ok){
       for (const alt of MIRRORS.workerPath){
         if (alt === paths.workerPath) continue;
-        ocrStatus.textContent = 'OCR 元件連線不穩，切換鏡像來源（worker）…';
-        if (await probe(alt)) { paths.workerPath = alt; break; }
+        ocrStatus.textContent = `OCR 元件連線不穩，切換鏡像來源（worker）…\n→ 嘗試：${alt}`;
+        if (await probe(alt)) { paths.workerPath = alt; ocrStatus.textContent = `已切換 worker 來源：${alt}`; break; }
       }
     }
-    // 測語言包（eng）
-    ok = await probe(`${paths.langPath.replace(/\/$/, '')}/eng.traineddata`);
-    if (!ok){
-      for (const alt of MIRRORS.langPath){
-        if (alt === paths.langPath) continue;
-        ocrStatus.textContent = '語言資料連線不穩，切換鏡像來源（eng）…';
-        if (await probe(`${alt.replace(/\/$/, '')}/eng.traineddata`)) { paths.langPath = alt; break; }
-      }
+    // 準備語言包候選清單
+    const langCandidates = [];
+    if (explicitLangPath) langCandidates.push(explicitLangPath);
+    if (localLang) langCandidates.push('./assets/tessdata');
+    // 既有路徑先檢查
+    langCandidates.push(paths.langPath);
+    for (const m of MIRRORS.langPath){ if (!langCandidates.includes(m)) langCandidates.push(m); }
+
+    // 逐一探測語言包（eng）並切換
+    let chosen = null;
+    for (const base of langCandidates){
+      const baseTrim = base.replace(/\/$/, '');
+      const testUrl = `${baseTrim}/eng.traineddata`;
+      ocrStatus.textContent = `語言資料連線不穩，切換鏡像來源（eng）…\n→ 嘗試：${testUrl}`;
+      ok = await probe(testUrl, 7000, 2);
+      if (ok){ chosen = baseTrim; break; }
+    }
+    if (chosen){
+      paths.langPath = chosen;
+      ocrStatus.textContent = `語言資料來源：${chosen}`;
+    } else {
+      // 所有鏡像皆不可達
+      ocrStatus.textContent = '語言資料（eng）所有鏡像皆不可達，請確認網路或改用同源方案：在網址加上 ?localLang=1 並將 eng.traineddata 置於 /assets/tessdata/';
     }
   };
 
@@ -180,7 +221,7 @@ async function runOcr(source, opts={}){
     }
 
     await withTimeout(worker.load(), 15000, '載入 OCR Worker');
-    ocrStatus.textContent = '下載語言資料（eng）…';
+    ocrStatus.textContent = `下載語言資料（eng）…\n來源：${paths.langPath.replace(/\/$/, '')}/eng.traineddata`;
     await withTimeout(worker.loadLanguage('eng'), 25000, '下載語言資料');
     await withTimeout(worker.initialize('eng'), 10000, '初始化語言（eng）');
     if (opts.psm) await worker.setParameters({ tessedit_pageseg_mode: String(opts.psm) });
