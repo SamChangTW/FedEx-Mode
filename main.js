@@ -235,6 +235,28 @@ async function runOcr(source, opts={}){
       paths.langGz = useGz;
       const suffix = useGz ? 'eng.traineddata.gz' : 'eng.traineddata';
       ocrStatus.textContent = `語言資料來源：${chosen}\n將下載：${chosen}/${suffix}`;
+
+      // 預抓取語言檔（短逾時），若失敗且為同源且目前是 .gz，則改為 raw
+      const preflight = async (url)=>{
+        try{
+          const ctrl = new AbortController();
+          const id = setTimeout(()=>ctrl.abort(), 10000);
+          const r = await fetch(url, { method:'GET', cache:'no-store', redirect:'follow', signal: ctrl.signal });
+          clearTimeout(id);
+          return r.ok;
+        }catch{ return false; }
+      };
+      let okPre = await preflight(`${chosen}/${suffix}`);
+      let isLocalOrigin=false; try{ isLocalOrigin = new URL(chosen).origin===location.origin; }catch{}
+      if (!okPre && isLocalOrigin && useGz){
+        const alt = `${chosen}/eng.traineddata`;
+        ocrStatus.textContent = `語言資料（.gz）預抓取失敗，嘗試未壓縮：${alt}`;
+        okPre = await preflight(alt);
+        if (okPre){
+          paths.langGz = false;
+          ocrStatus.textContent = `語言資料來源：${chosen}\n將下載：${chosen}/eng.traineddata`;
+        }
+      }
     } else {
       // 所有鏡像皆不可達
       ocrStatus.textContent = '語言資料（eng）所有鏡像皆不可達，請確認網路或改用同源方案：在網址加上 ?localLang=1 並將 eng.traineddata.gz（或 eng.traineddata）置於 /assets/tessdata/';
@@ -245,6 +267,30 @@ async function runOcr(source, opts={}){
   const T = (window.Tesseract && (window.Tesseract.default || window.Tesseract)) || undefined;
   const ver = (T && (T.version || T.default?.version)) || (window.Tesseract && window.Tesseract.version) || '';
   ocrStatus.textContent = `載入 OCR 元件…${ver ? ` (tesseract.js ${ver})` : ''}`;
+
+  // 若用戶要求跳過 worker，改用快速路徑（非持久 worker）
+  const qs2 = new URLSearchParams(location.search);
+  const forceNoWorker = qs2.get('noWorker') === '1';
+  if (forceNoWorker){
+    const T = (window.Tesseract && (window.Tesseract.default || window.Tesseract)) || undefined;
+    if (!T) throw new Error('找不到 Tesseract 物件');
+    await ensureAccessible();
+    const recognize = (T.recognize || T.default?.recognize).bind(T);
+    ocrStatus.textContent = '使用快速路徑（無 worker）…';
+    const { data } = await withTimeout(recognize(source, 'eng', {
+      workerPath: paths.workerPath,
+      corePath: paths.corePath,
+      langPath: paths.langPath,
+      gzip: paths.langGz!==false,
+      logger: m => {
+        if (m.status === 'recognizing text') {
+          ocrProgress.value = m.progress || 0;
+          ocrStatus.textContent = `辨識中… ${(m.progress*100).toFixed(0)}%`;
+        }
+      }
+    }), 45000, '快速辨識');
+    return { text: data.text || '', confidence: data.confidence };
+  }
 
   // 嘗試以 worker 模式執行（效能較佳）
   try {
