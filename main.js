@@ -100,13 +100,11 @@ async function runOcr(source, opts={}){
       'https://unpkg.com/tesseract.js-core@5.0.0/tesseract-core.wasm.js'
     ],
     langPath: [
-      // Primary (per user preference): tessdata_fast on GitHub raw
-      // 語言資料來源優先使用： https://raw.githubusercontent.com/tesseract-ocr/tessdata_fast/4.0.0
-      'https://raw.githubusercontent.com/tesseract-ocr/tessdata_fast/4.0.0',
-      // Naptha official mirrors
+      // 優先選擇提供 .traineddata.gz 的來源（符合 tesseract.js v5 預期）
       'https://tessdata.projectnaptha.com/4.0.0',
       'https://cdn.jsdelivr.net/gh/naptha/tessdata@gh-pages/4.0.0',
-      // Additional fallbacks (GitHub raw — often 可達，但 HEAD 可能被擋，稍後以 GET 探測)
+      // 次選（GitHub raw 多為未壓縮 .traineddata，通常不適用於 v5 預設的 .gz 下載）
+      'https://raw.githubusercontent.com/tesseract-ocr/tessdata_fast/4.0.0',
       'https://raw.githubusercontent.com/tesseract-ocr/tessdata/4.0.0',
       'https://raw.githubusercontent.com/tesseract-ocr/tessdata_best/4.0.0'
     ]
@@ -185,21 +183,33 @@ async function runOcr(source, opts={}){
     langCandidates.push(paths.langPath);
     for (const m of MIRRORS.langPath){ if (!langCandidates.includes(m)) langCandidates.push(m); }
 
-    // 逐一探測語言包（eng）並切換
+    // 逐一探測語言包（eng）並切換；優先檢查 .traineddata.gz，其次才檢查未壓縮（不建議）
     let chosen = null;
+    let useGz = true;
     for (const base of langCandidates){
       const baseTrim = base.replace(/\/$/, '');
-      const testUrl = `${baseTrim}/eng.traineddata`;
-      ocrStatus.textContent = `語言資料連線不穩，切換鏡像來源（eng）…\n→ 嘗試：${testUrl}`;
-      ok = await probe(testUrl, 7000, 2);
-      if (ok){ chosen = baseTrim; break; }
+      const gzUrl = `${baseTrim}/eng.traineddata.gz`;
+      ocrStatus.textContent = `語言資料來源測試（gz）…\n→ 嘗試：${gzUrl}`;
+      ok = await probe(gzUrl, 7000, 2);
+      if (ok){ chosen = baseTrim; useGz = true; break; }
+
+      // 僅在同源（localLang）路徑上允許退而求其次使用未壓縮，避免 v5 預設抓 .gz 造成失敗
+      const isLocal = baseTrim.startsWith('./') || baseTrim.startsWith(self?.registration?.scope||'___NOPE___');
+      if (isLocal){
+        const rawUrl = `${baseTrim}/eng.traineddata`;
+        ocrStatus.textContent = `語言資料來源測試（raw）…\n→ 嘗試：${rawUrl}`;
+        ok = await probe(rawUrl, 7000, 2);
+        if (ok){ chosen = baseTrim; useGz = false; break; }
+      }
     }
     if (chosen){
       paths.langPath = chosen;
-      ocrStatus.textContent = `語言資料來源：${chosen}`;
+      paths.langGz = useGz;
+      const suffix = useGz ? 'eng.traineddata.gz' : 'eng.traineddata';
+      ocrStatus.textContent = `語言資料來源：${chosen}\n將下載：${chosen}/${suffix}`;
     } else {
       // 所有鏡像皆不可達
-      ocrStatus.textContent = '語言資料（eng）所有鏡像皆不可達，請確認網路或改用同源方案：在網址加上 ?localLang=1 並將 eng.traineddata 置於 /assets/tessdata/';
+      ocrStatus.textContent = '語言資料（eng）所有鏡像皆不可達，請確認網路或改用同源方案：在網址加上 ?localLang=1 並將 eng.traineddata.gz（或 eng.traineddata）置於 /assets/tessdata/';
     }
   };
 
@@ -223,8 +233,9 @@ async function runOcr(source, opts={}){
     }
 
     await withTimeout(worker.load(), 15000, '載入 OCR Worker');
-    ocrStatus.textContent = `下載語言資料（eng）…\n來源：${paths.langPath.replace(/\/$/, '')}/eng.traineddata`;
-    await withTimeout(worker.loadLanguage('eng'), 25000, '下載語言資料');
+    const langSuffix = paths.langGz === false ? 'eng.traineddata' : 'eng.traineddata.gz';
+    ocrStatus.textContent = `下載語言資料（eng）…\n來源：${paths.langPath.replace(/\/$/, '')}/${langSuffix}`;
+    await withTimeout(worker.loadLanguage('eng'), 30000, '下載語言資料');
     await withTimeout(worker.initialize('eng'), 10000, '初始化語言（eng）');
     if (opts.psm) await worker.setParameters({ tessedit_pageseg_mode: String(opts.psm) });
     if (opts.whitelist) await worker.setParameters({ tessedit_char_whitelist: opts.whitelist });
