@@ -100,11 +100,13 @@ async function runOcr(source, opts={}){
       'https://unpkg.com/tesseract.js-core@5.0.0/tesseract-core.wasm.js'
     ],
     langPath: [
-      // Primary (Naptha official mirrors)
+      // Primary (per user preference): tessdata_fast on GitHub raw
+      // 語言資料來源優先使用： https://raw.githubusercontent.com/tesseract-ocr/tessdata_fast/4.0.0
+      'https://raw.githubusercontent.com/tesseract-ocr/tessdata_fast/4.0.0',
+      // Naptha official mirrors
       'https://tessdata.projectnaptha.com/4.0.0',
       'https://cdn.jsdelivr.net/gh/naptha/tessdata@gh-pages/4.0.0',
-      // Additional fallbacks (GitHub raw — often可達，但 HEAD 可能被擋，稍後以 GET 探測)
-      'https://raw.githubusercontent.com/tesseract-ocr/tessdata_fast/4.0.0',
+      // Additional fallbacks (GitHub raw — often 可達，但 HEAD 可能被擋，稍後以 GET 探測)
       'https://raw.githubusercontent.com/tesseract-ocr/tessdata/4.0.0',
       'https://raw.githubusercontent.com/tesseract-ocr/tessdata_best/4.0.0'
     ]
