@@ -75,14 +75,29 @@ btnOcr.addEventListener("click", async () => {
     autoMap(ocrText.value || "");
   } catch (err) {
     console.error(err);
-    ocrStatus.textContent = "辨識失敗，請嘗試較清晰的圖片。";
+    const msg = (err && (err.message || err.toString())) || '';
+    // 常見：語言資料無法下載（離線 / 被阻擋）
+    if (/Failed to load language/i.test(msg) || /loadLanguage/i.test(msg) || /network/i.test(msg)){
+      ocrStatus.textContent = "辨識失敗：需要網路下載語言資料（eng）。請連線後重試。";
+    } else {
+      ocrStatus.textContent = `辨識失敗，請嘗試較清晰的圖片。${msg ? '（'+msg+'）' : ''}`;
+    }
   }
 });
 
 // Core OCR runner with basic config and progress logger
 async function runOcr(source, opts={}){
-  const worker = Tesseract.createWorker();
+  // 明確指定 Tesseract 各組件路徑，避免在 PWA/行動裝置上載入失敗
+  const t5 = 'https://cdn.jsdelivr.net/npm/tesseract.js@5/dist';
+  const worker = Tesseract.createWorker({
+    workerPath: `${t5}/worker.min.js`,
+    corePath: 'https://cdn.jsdelivr.net/npm/tesseract.js-core@5/tesseract-core.wasm.js',
+    // 使用公開英文字語料（如需中英混合再另行加入）
+    langPath: 'https://tessdata.projectnaptha.com/4.0.0',
+  });
+  ocrStatus.textContent = '載入 OCR 元件…';
   await worker.load();
+  ocrStatus.textContent = '下載語言資料（eng）…';
   await worker.loadLanguage('eng');
   await worker.initialize('eng');
   if (opts.psm) await worker.setParameters({ tessedit_pageseg_mode: String(opts.psm) });
@@ -399,7 +414,10 @@ btnPdf.addEventListener("click", async () => {
         return pageLocal;
       };
 
-      // Source: uploaded file first, else fallback to assets/ci_template.pdf, then assets/ci_template.png
+      // Source priority:
+      // 1) User uploaded file
+      // 2) New official template: assets/fedex-commercial-invoice-form-tw.pdf
+      // 3) Legacy fallbacks: assets/ci_template.(pdf|png|jpg)
       let tplBytes = null;
       let mime = "";
       if (tplInput && tplInput.files && tplInput.files[0]) {
@@ -407,9 +425,15 @@ btnPdf.addEventListener("click", async () => {
         mime = tplInput.files[0].type || "image/png";
       } else {
         try {
-          const respPdf = await fetch('assets/ci_template.pdf');
-          if (respPdf.ok) { tplBytes = await respPdf.arrayBuffer(); mime = 'application/pdf'; }
+          const respPdfNew = await fetch('assets/fedex-commercial-invoice-form-tw.pdf');
+          if (respPdfNew.ok) { tplBytes = await respPdfNew.arrayBuffer(); mime = 'application/pdf'; }
         } catch {}
+        if (!tplBytes) {
+          try {
+            const respPdf = await fetch('assets/ci_template.pdf');
+            if (respPdf.ok) { tplBytes = await respPdf.arrayBuffer(); mime = 'application/pdf'; }
+          } catch {}
+        }
         if (!tplBytes) {
           try {
             const respPng = await fetch('assets/ci_template.png');
@@ -484,8 +508,14 @@ btnPdf.addEventListener("click", async () => {
     // If using FedEx template, we skip drawing our legacy boxes and only place text at mapped positions.
     const usingTemplate = !!(wantTpl);
     if (usingTemplate) {
-      // Coordinates are initial estimates. They likely need fine-tuning against the actual template image.
-      // Top: AWB and Export Date rows
+      // === New official FedEx TW invoice template vector mapping ===
+      // A4 baseline coordinates measured approximately on the provided assets/fedex-commercial-invoice-form-tw.pdf
+      // Provide quick fine-tune offsets via query string: ?dx=..&dy=..&debugTpl=1
+      const qs = new URLSearchParams(location.search);
+      const dx = Number(qs.get('dx')||0);
+      const dy = Number(qs.get('dy')||0);
+      const debugTpl = /(^|&)debugTpl=1(&|$)/.test(location.search);
+      // font size baseline
       const size = 10;
 
       // Map A4-based coordinates to actual page coordinates (in case template PDF is not exactly A4)
@@ -496,8 +526,8 @@ btnPdf.addEventListener("click", async () => {
       } catch {}
       const sx = pw / A4[0];
       const sy = ph / A4[1];
-      const mx = (x)=> x * sx;
-      const my = (y)=> y * sy;
+      const mx = (x)=> (x + dx) * sx;
+      const my = (y)=> (y + dy) * sy;
 
       const drawTextM = (t, x, y, s=size, f=helv) => page.drawText(String(t||''), { x: mx(x), y: my(y), size: s, font: f, color: rgb(0,0,0) });
       const rightAlign = (t, xr, yy, f=helv, s=size)=>{
@@ -505,47 +535,53 @@ btnPdf.addEventListener("click", async () => {
         page.drawText(String(t||''), { x: mx(xr) - w, y: my(yy), size: s, font: f, color: rgb(0,0,0) });
       };
 
-      // AWB
+      // Header fields
+      // AWB (Air Waybill No.) — left part top row
       drawTextM(String(data.awb||''), 155, 785, size, helv);
-      // Date of Exportation
+      // Date of Exportation — below AWB
       drawTextM(String(data.date||''), 155, 751, size, helv);
-      // Seller (name and address)
-      drawTextM(String(data.seller||''), 55, 716, size, helv);
-      let yy = 700;
-      for (const [i, line] of wrapText(data.sellerAddr, 300, helv, size).entries()) {
-        drawTextM(line, 55, yy - i*12, size, helv);
-      }
-      // Consignee
-      drawTextM(String(data.buyer||''), 360, 716, size, helv);
-      yy = 700;
-      for (const [i, line] of wrapText(data.buyerAddr, 300, helv, size).entries()) {
-        drawTextM(line, 360, yy - i*12, size, helv);
-      }
-
-      // Shipment meta (Weight / Pieces)
+      // Weight / Pieces — top right corner small boxes
       drawTextM(String(data.weight||''), 475, 785, size, helv);
       drawTextM(String(data.pieces||''), 520, 785, size, helv);
 
-      // Items table — single-line simplified placement
-      // Description
+      // Parties
+      drawTextM(String(data.seller||''), 55, 716, size, helv);
+      let yy = 700;
+      for (const [i, line] of wrapText(data.sellerAddr, 300, helv, size).entries()) drawTextM(line, 55, yy - i*12, size, helv);
+      drawTextM(String(data.buyer||''), 360, 716, size, helv);
+      yy = 700;
+      for (const [i, line] of wrapText(data.buyerAddr, 300, helv, size).entries()) drawTextM(line, 360, yy - i*12, size, helv);
+
+      // Items table (single row)
+      // Description column wide text
       drawTextM(String(data.desc||''), 200, 404, size, helv);
-      // HS code left empty by default
-      // QTY
+      // QTY (right aligned)
       rightAlign(String(data.pieces||''), 420, 404, helv, size);
-      // Unit of measure not available; skipped or map from weight text
-      // Weight (assuming numeric extraction not enforced)
+      // Weight (right aligned)
       rightAlign(String(data.weight||''), 480, 404, helv, size);
-      // Unit Value (currency is dynamic; user said use B/L; we keep numeric amount only)
+      // Unit Value (USD) right aligned numeric
       rightAlign(Number.isFinite(data.amount)?data.amount.toFixed(2):String(data.amount||''), 540, 404, helv, size);
-      // Total Value (same as amount in single-item case)
+      // Total Value (same as amount for 1 line)
       rightAlign(Number.isFinite(data.amount)?data.amount.toFixed(2):String(data.amount||''), 585, 404, helv, size);
 
-      // Totals section at lower-right
+      // Totals block at lower right
       rightAlign(Number.isFinite(data.amount)?data.amount.toFixed(2):String(data.amount||''), 585, 150, helv, size+1);
 
-      // Footer signature fields (name/title/date) left blank for user to fill after print, or we can fill with seller/date
+      // Footer fields (optional prefill)
       drawTextM(String(data.seller||''), 55, 95, size, helv);
       drawTextM(String(data.date||''), 360, 95, size, helv);
+
+      // Optional debug guides for alignment
+      if (debugTpl) {
+        const guide = (x,y,w=4,h=4)=>page.drawRectangle({x:mx(x)-w/2,y:my(y)-h/2,width:w,height:h,color:rgb(1,0,0)});
+        // drop small markers at key anchors
+        [
+          [155,785],[155,751],[475,785],[520,785],
+          [55,716],[55,700],[360,716],[360,700],
+          [200,404],[420,404],[480,404],[540,404],[585,404],
+          [585,150],[55,95],[360,95]
+        ].forEach(([x0,y0])=>guide(x0,y0));
+      }
 
       const bytes = await pdf.save();
       const blob = new Blob([bytes], {type:"application/pdf"});
@@ -555,7 +591,7 @@ btnPdf.addEventListener("click", async () => {
       a.download = fname;
       a.click();
       URL.revokeObjectURL(a.href);
-      outStatus.textContent = "PDF 已下載（FedEx 官方版型）。";
+      outStatus.textContent = "PDF 已下載（FedEx 官方新版樣板）。";
       return;
     }
 

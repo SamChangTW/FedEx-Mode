@@ -1,6 +1,7 @@
 const CACHE='fedex-ocr-r2';
 const ASSETS=[
   './','./index.html','./style.css','./main.js','./manifest.json',
+  './assets/fedex-commercial-invoice-form-tw.pdf',
   'https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js',
   'https://cdn.jsdelivr.net/npm/pdf-lib@1.17.1/dist/pdf-lib.min.js'
 ];
