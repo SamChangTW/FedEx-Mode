@@ -196,20 +196,33 @@ async function runOcr(source, opts={}){
       if (!langCandidates.includes(abs)) langCandidates.push(abs);
     }
 
-    // 逐一探測語言包（eng）並切換；優先檢查 .traineddata.gz，其次才檢查未壓縮（不建議）
+    // 逐一探測語言包（eng）並切換
+    // 規則：同源（您的站台）優先嘗試未壓縮 raw，再嘗試 .gz；跨網域則維持先 .gz 後 raw 的策略
     let chosen = null;
     let useGz = true;
     for (const base of langCandidates){
       const baseTrim = base.replace(/\/$/, '');
-      const gzUrl = `${baseTrim}/eng.traineddata.gz`;
-      ocrStatus.textContent = `語言資料來源測試（gz）…\n→ 嘗試：${gzUrl}`;
-      ok = await probe(gzUrl, 7000, 2);
-      if (ok){ chosen = baseTrim; useGz = true; break; }
-
-      // 僅在同源（localLang）路徑上允許退而求其次使用未壓縮，避免 v5 預設抓 .gz 造成失敗
       let isLocal = false;
       try { isLocal = new URL(baseTrim).origin === location.origin; } catch { isLocal = false; }
+
       if (isLocal){
+        // 同源：先試 raw，再試 gz（某些環境對 .gz 有特殊處理會導致卡住）
+        const rawUrl = `${baseTrim}/eng.traineddata`;
+        ocrStatus.textContent = `語言資料來源測試（raw，同源優先）…\n→ 嘗試：${rawUrl}`;
+        ok = await probe(rawUrl, 7000, 2);
+        if (ok){ chosen = baseTrim; useGz = false; break; }
+
+        const gzUrl = `${baseTrim}/eng.traineddata.gz`;
+        ocrStatus.textContent = `語言資料來源測試（gz）…\n→ 嘗試：${gzUrl}`;
+        ok = await probe(gzUrl, 7000, 2);
+        if (ok){ chosen = baseTrim; useGz = true; break; }
+      } else {
+        // 跨網域：先試 gz，再退 raw
+        const gzUrl = `${baseTrim}/eng.traineddata.gz`;
+        ocrStatus.textContent = `語言資料來源測試（gz）…\n→ 嘗試：${gzUrl}`;
+        ok = await probe(gzUrl, 7000, 2);
+        if (ok){ chosen = baseTrim; useGz = true; break; }
+
         const rawUrl = `${baseTrim}/eng.traineddata`;
         ocrStatus.textContent = `語言資料來源測試（raw）…\n→ 嘗試：${rawUrl}`;
         ok = await probe(rawUrl, 7000, 2);
@@ -240,7 +253,26 @@ async function runOcr(source, opts={}){
     const createWorker = T && (T.createWorker || T.default?.createWorker);
     if (!createWorker) throw new Error('Tesseract.createWorker 不存在');
 
-    let worker = createWorker.call(T, paths);
+    // 以探測結果決定是否停用 gzip（同源且只提供未壓縮檔時）
+    const isLocalOrigin = (()=>{ try{ return new URL(paths.langPath).origin === location.origin; }catch{ return false; } })();
+    const workerOptsBase = {
+      workerPath: paths.workerPath,
+      corePath: paths.corePath,
+      langPath: paths.langPath,
+      // 傳遞 logger 以更新進度條（可選）
+      logger: (m)=>{
+        try{
+          if (m && m.progress!=null) ocrProgress.value = m.progress;
+        }catch{}
+      }
+    };
+
+    const buildWorkerOpts = (useGzip)=> ({
+      ...workerOptsBase,
+      ...(useGzip===false ? { gzip: false } : {})
+    });
+
+    let worker = createWorker.call(T, buildWorkerOpts(paths.langGz!==false));
     // 某些版本會回傳 Promise
     if (worker && typeof worker.then === 'function') worker = await worker;
     if (!worker || typeof worker.load !== 'function') {
@@ -248,9 +280,29 @@ async function runOcr(source, opts={}){
     }
 
     await withTimeout(worker.load(), 15000, '載入 OCR Worker');
-    const langSuffix = paths.langGz === false ? 'eng.traineddata' : 'eng.traineddata.gz';
-    ocrStatus.textContent = `下載語言資料（eng）…\n來源：${paths.langPath.replace(/\/$/, '')}/${langSuffix}`;
-    await withTimeout(worker.loadLanguage('eng'), 30000, '下載語言資料');
+    const tryLoadLanguage = async (gzipMode) => {
+      const suffix = gzipMode===false ? 'eng.traineddata' : 'eng.traineddata.gz';
+      ocrStatus.textContent = `下載語言資料（eng）…\n來源：${paths.langPath.replace(/\/$/, '')}/${suffix}`;
+      await withTimeout(worker.loadLanguage('eng'), 30000, '下載語言資料');
+    };
+
+    try {
+      await tryLoadLanguage(paths.langGz!==false);
+    } catch (e) {
+      // 若同源且目前為 .gz 模式，嘗試改用未壓縮檔（gzip:false）重試一次
+      const msg = (e && (e.message||e.toString()))||'';
+      const canFallbackToRaw = isLocalOrigin && (paths.langGz!==false);
+      if (canFallbackToRaw){
+        ocrStatus.textContent = `下載語言資料（.gz）失敗，改用未壓縮檔重試…\n原因：${msg}`;
+        try { if (worker && worker.terminate) await worker.terminate(); } catch {}
+        worker = createWorker.call(T, buildWorkerOpts(false));
+        if (worker && typeof worker.then === 'function') worker = await worker;
+        await withTimeout(worker.load(), 15000, '載入 OCR Worker（raw）');
+        await tryLoadLanguage(false);
+      } else {
+        throw e;
+      }
+    }
     await withTimeout(worker.initialize('eng'), 10000, '初始化語言（eng）');
     if (opts.psm) await worker.setParameters({ tessedit_pageseg_mode: String(opts.psm) });
     if (opts.whitelist) await worker.setParameters({ tessedit_char_whitelist: opts.whitelist });
