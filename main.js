@@ -363,8 +363,16 @@ async function runOcr(source, opts={}){
       }
     }
     await withTimeout(worker.initialize(LANGS), 10000, `初始化語言（${LANGS}）`);
+    // OCR 參數微調：
+    // - tessedit_pageseg_mode（PSM）：可由各欄位覆寫
+    // - preserve_interword_spaces：保留單字間空白，避免黏字導致錯置
+    // - user_defined_dpi：提升低解析度相片的內部 DPI 假設
+    // - tessedit_char_whitelist/blacklist：針對欄位限定字元，降低誤辨
     if (opts.psm) await worker.setParameters({ tessedit_pageseg_mode: String(opts.psm) });
+    await worker.setParameters({ preserve_interword_spaces: '1' });
+    await worker.setParameters({ user_defined_dpi: '300' });
     if (opts.whitelist) await worker.setParameters({ tessedit_char_whitelist: opts.whitelist });
+    if (opts.blacklist) await worker.setParameters({ tessedit_char_blacklist: opts.blacklist });
 
     const { data } = await worker.recognize(source, {
       logger: m => {
@@ -527,15 +535,29 @@ function normalizeDateLike(s){
 }
 
 function extractAmountUSD(s){
-  const m = s.match(/CUSTOMS\s*VALUE[:\s]*\$?\s*([\d,]+(?:\.[\d]{1,2})?)/i) || s.match(/\$?\s*([\d,]+(?:\.[\d]{1,2})?)\s*USD/i);
+  // 常見樣式：
+  //  - CUSTOMS VALUE: $123.45
+  //  - USD 123.45 / 123.45 USD
+  //  - TOTAL / AMOUNT 欄位內的數字
+  let m = s.match(/CUSTOMS\s*VALUE[:\s]*\$?\s*([\d,]+(?:\.[\d]{1,2})?)/i)
+       || s.match(/USD\s*\$?\s*([\d,]+(?:\.[\d]{1,2})?)/i)
+       || s.match(/\$\s*([\d,]+(?:\.[\d]{1,2})?)/)
+       || s.match(/([\d,]+(?:\.[\d]{1,2})?)\s*USD/i)
+       || s.match(/(?:TOTAL|AMOUNT|VALUE)[^\d]*([\d,]+(?:\.[\d]{1,2})?)/i);
   return m ? m[1].replace(/,/g,'') : '';
 }
 
 function extractWeight(s){
-  const m = s.match(/(?:ACT\s*WGT|WT|WEIGHT)\s*[:\-]?\s*([\d.,]+)\s*(KG|KGS?|G|GRAMS?|LB|LBS?)\b/i);
+  // 修正常見 OCR 誤辨：K6->KG, L8->LB
+  const fixUnit = (u)=> u
+    .toUpperCase()
+    .replace(/K6/g, 'KG')
+    .replace(/L8/g, 'LB')
+    .replace(/S$/,'');
+  const m = s.match(/(?:ACT\s*WGT|ACT\.?\s*WT|WT|WEIGHT)\s*[:\-]?\s*([\d.,]+)\s*([A-Z]{1,3})\b/i);
   if (!m) return '';
   const num = m[1].replace(/,/g,'');
-  const unit = m[2].toUpperCase().replace(/S$/,'');
+  const unit = fixUnit(m[2]);
   return `${num} ${unit}`;
 }
 
