@@ -94,7 +94,21 @@
 
   <!-- 已移除 tesseract.js（OCR 全數取消） -->
   <script src="https://cdn.jsdelivr.net/npm/pdf-lib@1.17.1/dist/pdf-lib.min.js"></script>
+  <!-- ZXing 主來源（unpkg），並在載入後做可用性偵測；若失敗，動態載入 jsDelivr 備援 -->
   <script src="https://unpkg.com/@zxing/library@0.20.0"></script>
+  <script>
+    (function(){
+      function loadFallback(){
+        if (window.ZXing && window.ZXing.BrowserMultiFormatReader) return;
+        var s = document.createElement('script');
+        s.src = 'https://cdn.jsdelivr.net/npm/@zxing/library@0.20.0';
+        s.async = true;
+        document.head.appendChild(s);
+      }
+      // 若 1 秒後仍未有 ZXing，嘗試載入備援
+      setTimeout(loadFallback, 1000);
+    })();
+  </script>
   <script src="main.js"></script>
 </body>
 </html>

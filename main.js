@@ -191,6 +191,21 @@ function parseFedExPdf417(rawBytes, text){
 }
 
 async function startBarcodeScan(){
+  // 基本環境檢查（HTTPS/localhost + 相機 API）
+  const secure = (window.isSecureContext === true) || /^https:/i.test(location.protocol) || /^(localhost|127\.0\.0\.1)$/i.test(location.hostname);
+  if (!secure){
+    const msg = '此功能需要在 https 或 localhost 環境執行，請改以 https 網址開啟本頁（或使用 GitHub Pages 連結）。';
+    if (barcodeStatus) barcodeStatus.textContent = msg;
+    alert(msg);
+    return;
+  }
+  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia){
+    const msg = '此瀏覽器不支援相機 API（getUserMedia）。請改用 Chrome / Edge / Safari 最新版，或檢查網站相機權限。';
+    if (barcodeStatus) barcodeStatus.textContent = msg;
+    alert(msg);
+    return;
+  }
+
   if (!window.ZXing || !ZXing.BrowserMultiFormatReader) {
     alert('尚未載入條碼掃描元件，請檢查網路或稍後再試。');
     return;
@@ -202,7 +217,17 @@ async function startBarcodeScan(){
   if (!_codeReader) _codeReader = new ZXing.BrowserMultiFormatReader();
 
   try {
+    // 先請求一次權限（可提早觸發權限提示）
+    try { await navigator.mediaDevices.getUserMedia({ video: true }); } catch(_e) { /* 若使用者拒絕，後續會在 decode 流程顯示錯誤 */ }
+
     const devices = await ZXing.BrowserMultiFormatReader.listVideoInputDevices();
+    if (!devices || devices.length===0){
+      const msg = '找不到可用的相機裝置（可能被其他 App 佔用，或此裝置無相機）。';
+      if (barcodeStatus) barcodeStatus.textContent = msg;
+      alert(msg);
+      _scanActive = false;
+      return;
+    }
     // 嘗試選擇後鏡頭（label 含 back/environment）
     let deviceId = devices[0]?.deviceId;
     const back = devices.find(d=>/back|environment/i.test(d.label||''));
