@@ -20,20 +20,14 @@
 
   <main>
     <section class="card">
-      <h2>1) 匯入影像</h2>
-      <div class="row">
-        <input id="fileInput" type="file" accept="image/*" />
-        <button id="btnCamera" type="button">拍照</button>
+      <h2>1) 掃描／手動輸入</h2>
+      <div class="row" style="gap:8px; align-items:center; flex-wrap:wrap;">
+        <button id="btnScanStart" type="button">啟用條碼/二維碼掃描</button>
+        <button id="btnScanStop" type="button">停止掃描</button>
+        <small id="barcodeStatus" style="opacity:.8"></small>
       </div>
-      <img id="preview" alt="預覽" />
-      <div class="row">
-        <button id="btnOcr" type="button">開始辨識</button>
-        <button id="btnEnhance" type="button">增強影像後重試</button>
-        <button id="btnRotate" type="button">旋轉90°</button>
-        <progress id="ocrProgress" value="0" max="1"></progress>
-        <span id="ocrStatus"></span>
-      </div>
-      <textarea id="ocrText" placeholder="OCR 原文（可略過）"></textarea>
+      <video id="barcodeVideo" playsinline style="width:100%;max-height:220px;display:none;background:#000;border-radius:8px"></video>
+      <!-- 已取消 OCR，保留純掃描與手動輸入流程 -->
     </section>
 
     <section class="card">
@@ -98,8 +92,9 @@
     <small>Public template · 無簽名 · 無 Logo · 僅必要欄位 · 可離線使用（PWA）</small>
   </footer>
 
-  <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
+  <!-- 已移除 tesseract.js（OCR 全數取消） -->
   <script src="https://cdn.jsdelivr.net/npm/pdf-lib@1.17.1/dist/pdf-lib.min.js"></script>
+  <script src="https://unpkg.com/@zxing/library@0.20.0"></script>
   <script src="main.js"></script>
 </body>
 </html>

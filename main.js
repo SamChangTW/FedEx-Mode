@@ -8,6 +8,11 @@ const ocrProgress = $("ocrProgress");
 const ocrStatus = $("ocrStatus");
 const ocrText = $("ocrText");
 const preview = $("preview");
+// Barcode scan UI
+const btnScanStart = $("btnScanStart");
+const btnScanStop = $("btnScanStop");
+const barcodeVideo = $("barcodeVideo");
+const barcodeStatus = $("barcodeStatus");
 
 const awb = $("awb");
 const dateEl = $("date");
@@ -30,12 +35,14 @@ const useFedExTpl = $("useFedExTpl");
 const tplInput = $("tplInput");
 const tplRow = $("tplRow");
 
-// Camera shortcut
-btnCamera.addEventListener("click", () => {
-  fileInput.setAttribute("capture", "environment");
-  fileInput.click();
-  setTimeout(() => fileInput.removeAttribute("capture"), 1000);
-});
+// Camera shortcut（已取消 OCR，僅在元件存在時啟用，避免報錯）
+if (btnCamera && fileInput) {
+  btnCamera.addEventListener("click", () => {
+    fileInput.setAttribute("capture", "environment");
+    fileInput.click();
+    setTimeout(() => fileInput.removeAttribute("capture"), 1000);
+  });
+}
 
 // Toggle template row visibility based on checkbox
 if (useFedExTpl && tplRow) {
@@ -47,52 +54,223 @@ if (useFedExTpl && tplRow) {
   syncTplRow();
 }
 
-fileInput.addEventListener("change", (e) => {
-  const file = e.target.files?.[0];
-  if (!file) return;
-  const reader = new FileReader();
-  reader.onload = () => preview.src = reader.result;
-  reader.readAsDataURL(file);
-});
+if (fileInput) {
+  fileInput.addEventListener("change", (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => { if (preview) preview.src = reader.result; };
+    reader.readAsDataURL(file);
+  });
+}
 
-btnOcr.addEventListener("click", async () => {
-  const file = fileInput.files?.[0];
-  if (!file && !preview.src) {
-    alert("請先拍照或選擇一張圖片。");
+// ===== 條碼/二維碼掃描（ZXing） =====
+let _codeReader = null;
+let _scanActive = false;
+const _qs = new URLSearchParams(location.search);
+const _scanDebug = _qs.get('debugScan') === '1';
+
+function stopBarcodeScan(){
+  try{
+    _scanActive = false;
+    if (_codeReader && _codeReader.reset) _codeReader.reset();
+  }catch{}
+  try{
+    if (barcodeVideo) {
+      const stream = barcodeVideo.srcObject;
+      if (stream && stream.getTracks) stream.getTracks().forEach(t=>t.stop());
+      barcodeVideo.srcObject = null;
+      barcodeVideo.style.display = 'none';
+    }
+  }catch{}
+  if (barcodeStatus) barcodeStatus.textContent = '';
+}
+
+function parseBarcodePayload(text){
+  const out = {};
+  if (!text) return out;
+  // 1) 先嘗試 AWB（12–14 位數字）
+  const awbMatch = (text.replace(/\D/g,'').match(/\d{12,14}/)||[])[0];
+  if (awbMatch) out.awb = awbMatch;
+  // 2) 嘗試簡單鍵值對（適用部分 2D 條碼）
+  // 例：TO:..., FROM:..., DESC:..., VALUE:..., WT:...
+  const lines = text.split(/\r?\n|\|/).map(s=>s.trim()).filter(Boolean);
+  for (const ln of lines){
+    const m = ln.match(/^([A-Z]{2,10})\s*[:=]\s*(.+)$/i);
+    if (!m) continue;
+    const k = m[1].toUpperCase();
+    const v = m[2].trim();
+    if (k==='TRK' || k==='AWB' || k==='TRACK' || k==='TRACKING') out.awb = v.replace(/\D/g,'');
+    if (k==='TO' || k==='RCPT' || k==='RECIPIENT') out.buyer = v;
+    if (k==='TOADDR' || k==='TO_ADDRESS' || k==='ADDR' || k==='ADDRESS') out.buyerAddr = v;
+    if (k==='FROM' || k==='SENDER') out.seller = v;
+    if (k==='FROMADDR' || k==='SENDERADDR') out.sellerAddr = v;
+    if (k==='DESC' || k==='DESCRIPTION') out.desc = v;
+    if (k==='VALUE' || k==='AMOUNT') out.amount = (v.match(/[\d,.]+/)||[''])[0].replace(/,/g,'');
+    if (k==='WT' || k==='WEIGHT') out.weight = v;
+    if (k==='DATE' || k==='SHIPDATE') {
+      // 允許各式日期，交由 normalizeDateLike 處理
+      const norm = normalizeDateLike(v);
+      if (norm) out.date = norm;
+    }
+  }
+  return out;
+}
+
+// 嘗試解析 FedEx PDF417（或 DataMatrix）常見內容（含 raw bytes）
+// 目標：盡力取出 TRK/AWB 與 收/寄件人姓名與地址（城市/郵遞區號/國別）
+function parseFedExPdf417(rawBytes, text){
+  const out = {};
+  try{
+    // 1) 以文字層快速抓 AWB
+    const txt = text || '';
+    const awb = (txt.replace(/\D/g,'').match(/\d{12,14}/)||[])[0];
+    if (awb) out.awb = awb;
+
+    // 2) 將 raw bytes 轉換為「可見字串」，以 GS/RS 作為分隔符
+    let parts = [];
+    if (rawBytes && rawBytes.length){
+      let s = '';
+      for (let i=0;i<rawBytes.length;i++){
+        const b = rawBytes[i];
+        if (b===0x1D || b===0x1E || b===10 || b===13){ // GS/RS/LF/CR → 區段斷行
+          s += '\n';
+        } else if (b>=32 && b<=126){
+          s += String.fromCharCode(b);
+        } else {
+          // 其他控制字元以空白代替
+          s += ' ';
+        }
+      }
+      parts = s.split(/\n+/).map(v=>v.trim()).filter(Boolean);
+    } else {
+      // fallback：用可見文字切片
+      parts = (txt||'').split(/\r?\n|\|/).map(v=>v.trim()).filter(Boolean);
+    }
+
+    // 3) 從所有片段再找 12–14 位數字（補捉 AWB）
+    if (!out.awb){
+      for (const p of parts){
+        const m = (p.replace(/\D/g,'').match(/\d{12,14}/)||[])[0];
+        if (m){ out.awb = m; break; }
+      }
+    }
+
+    // 4) 嘗試找「收件人（TO）」與地址：
+    //    以「城市 + 郵遞區號 + 國別（可選）」樣式作為錨點，往前 1–3 行當地址/姓名
+    const cityZipIdx = parts.findIndex(p=>/(?:CITY|TOWNSHIP|COUNTY|DISTRICT|VILLAGE|TOWN|CITY\s*\d{2}|[A-Z]{2,})\s+\d{3,6}(?:\s+[A-Z]{2})?$/.test(p));
+    if (cityZipIdx>=0){
+      // 城市/郵遞區號行
+      const cz = parts[cityZipIdx];
+      const addrLines = [];
+      if (parts[cityZipIdx-1]) addrLines.unshift(parts[cityZipIdx-1]);
+      if (parts[cityZipIdx-2]) addrLines.unshift(parts[cityZipIdx-2]);
+      out.buyerAddr = [...addrLines, cz].join('\n');
+      // 嘗試把更靠前的一行當作姓名/機構
+      const nameLine = parts[cityZipIdx-3] || parts[cityZipIdx-2];
+      if (nameLine && /[A-Za-z]/.test(nameLine)) out.buyer = nameLine;
+    }
+
+    // 5) 嘗試找寄件人（ORIGIN/SENDER）區塊：
+    //    以常見關鍵詞 ORIGIN/SHIPPER/SENDER/FRM 標記的前後片段推測
+    const idxSender = parts.findIndex(p=>/ORIGIN|SHIPPER|SENDER|FROM/i.test(p));
+    if (idxSender>=0){
+      const slice = parts.slice(Math.max(0, idxSender), Math.min(parts.length, idxSender+5));
+      // 取切片中前 1–3 行作為姓名/地址
+      if (!out.seller && slice[1]) out.seller = slice[1];
+      if (!out.sellerAddr){
+        const addrCand = slice.slice(2).join('\n');
+        if (addrCand) out.sellerAddr = addrCand;
+      }
+    }
+
+    return out;
+  }catch(e){
+    return out;
+  }
+}
+
+async function startBarcodeScan(){
+  if (!window.ZXing || !ZXing.BrowserMultiFormatReader) {
+    alert('尚未載入條碼掃描元件，請檢查網路或稍後再試。');
     return;
   }
-  ocrStatus.textContent = "初始化 OCR…";
-  ocrProgress.value = 0;
+  if (_scanActive) return;
+  _scanActive = true;
+  if (barcodeStatus) barcodeStatus.textContent = '啟用相機中…';
+  if (barcodeVideo) barcodeVideo.style.display = 'block';
+  if (!_codeReader) _codeReader = new ZXing.BrowserMultiFormatReader();
 
   try {
-    // 若開啟分區 OCR（zonal=1），改走專屬流程
-    const qs = new URLSearchParams(location.search);
-    const useZonal = qs.get('zonal') === '1';
-    if (useZonal) {
-      const res = await zonalOcr(file ? file : preview.src);
-      ocrText.value = res.debugText || '';
-      ocrStatus.textContent = res.statusText || '完成（分區）';
-    } else {
-      const { text, confidence } = await runOcr(file ? file : preview.src);
-      ocrText.value = text || "";
-      if (text) {
-        ocrStatus.textContent = `完成（信心 ${Number(confidence||0).toFixed(1)}）`;
+    const devices = await ZXing.BrowserMultiFormatReader.listVideoInputDevices();
+    // 嘗試選擇後鏡頭（label 含 back/environment）
+    let deviceId = devices[0]?.deviceId;
+    const back = devices.find(d=>/back|environment/i.test(d.label||''));
+    if (back) deviceId = back.deviceId;
+
+    // 限定常見格式，降低誤判與提升速度
+    const hints = new Map();
+    const formats = [
+      ZXing.BarcodeFormat.CODE_128,
+      ZXing.BarcodeFormat.CODE_39,
+      ZXing.BarcodeFormat.ITF,
+      ZXing.BarcodeFormat.QR_CODE,
+      ZXing.BarcodeFormat.DATA_MATRIX,
+      ZXing.BarcodeFormat.PDF_417,
+    ];
+    hints.set(ZXing.DecodeHintType.POSSIBLE_FORMATS, formats);
+    _codeReader = new ZXing.BrowserMultiFormatReader(hints);
+
+    _codeReader.decodeFromVideoDevice(deviceId, barcodeVideo, (result, err) => {
+      if (!_scanActive) return;
+      if (result) {
+        const text = result.getText();
+        if (barcodeStatus) barcodeStatus.textContent = `解碼成功：${text.slice(0,80)}${text.length>80?'…':''}`;
+        // 映射欄位
+        const raw = (typeof result.getRawBytes==='function') ? result.getRawBytes() : null;
+        // 先用一般鍵值/數字規則，再用 FedEx PDF417 解析器補強
+        const parsed = Object.assign({}, parseBarcodePayload(text), parseFedExPdf417(raw, text));
+        if (parsed.awb) awb.value = parsed.awb;
+        if (parsed.date) dateEl.value = parsed.date;
+        if (parsed.seller) seller.value = parsed.seller;
+        if (parsed.sellerAddr) sellerAddr.value = parsed.sellerAddr;
+        if (parsed.buyer) buyer.value = parsed.buyer;
+        if (parsed.buyerAddr) buyerAddr.value = parsed.buyerAddr;
+        if (parsed.desc) desc.value = parsed.desc.replace(/^\d+\s*[:\-]\s*/,'');
+        if (parsed.amount) amount.value = parsed.amount;
+        if (parsed.weight) weight.value = parsed.weight;
+        if (_scanDebug && barcodeStatus){
+          const hex = raw && raw.length ? Array.from(raw).slice(0,64).map(b=>b.toString(16).padStart(2,'0')).join(' ') : 'n/a';
+          barcodeStatus.textContent += `\n[debug] bytes: ${raw?raw.length:0}, hex(64): ${hex}`;
+          barcodeStatus.textContent += `\n[parsed] AWB=${parsed.awb||''} | buyer=${parsed.buyer||''} | buyerAddr=${(parsed.buyerAddr||'').replace(/\n/g,' / ')} | seller=${parsed.seller||''}`;
+        }
+        // 取得 AWB 後可自動停止（避免重複觸發）
+        if (parsed.awb) {
+          stopBarcodeScan();
+          if (barcodeStatus) barcodeStatus.textContent = `已帶入 AWB：${parsed.awb}`;
+        }
+      } else if (err && !(err instanceof ZXing.NotFoundException)) {
+        if (barcodeStatus) barcodeStatus.textContent = `解碼中…（${err?.name||'等待'}）`;
       } else {
-        ocrStatus.textContent = "完成，但未擷取到文字。";
+        if (barcodeStatus) barcodeStatus.textContent = '對準條碼/二維碼…';
       }
-      autoMap(ocrText.value || "");
-    }
-  } catch (err) {
-    console.error(err);
-    const msg = (err && (err.message || err.toString())) || '';
-    // 常見：語言資料無法下載（離線 / 被阻擋）
-    if (/Failed to load language/i.test(msg) || /loadLanguage/i.test(msg) || /network/i.test(msg)){
-      ocrStatus.textContent = "辨識失敗：需要網路下載語言資料（eng）。請連線後重試。";
-    } else {
-      ocrStatus.textContent = `辨識失敗，請嘗試較清晰的圖片。${msg ? '（'+msg+'）' : ''}`;
-    }
+    });
+  } catch (e){
+    console.error(e);
+    if (barcodeStatus) barcodeStatus.textContent = `掃描初始化失敗：${e?.message||e}`;
+    stopBarcodeScan();
   }
-});
+}
+
+if (btnScanStart) btnScanStart.addEventListener('click', startBarcodeScan);
+if (btnScanStop) btnScanStop.addEventListener('click', stopBarcodeScan);
+
+// 已取消 OCR：僅在舊連結仍帶有按鈕時避免報錯
+if (btnOcr) {
+  btnOcr.addEventListener("click", () => {
+    alert('已取消 OCR。請改用「條碼/二維碼掃描」或手動輸入欄位。');
+  });
+}
 
 // Core OCR runner with robust worker initialization and diagnostics
 async function runOcr(source, opts={}){

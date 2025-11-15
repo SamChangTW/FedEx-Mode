@@ -1,4 +1,4 @@
-const CACHE='fedex-ocr-r9';
+const CACHE='fedex-ocr-r10';
 const ASSETS=[
   './','./index.html','./style.css','./main.js','./manifest.json',
   './assets/fedex-commercial-invoice-form-tw.pdf'
@@ -62,15 +62,42 @@ self.addEventListener('activate',e=>{
 
 // 同源資源：快取優先；跨源（CDN）資源：不快取，避免 API 不匹配
 self.addEventListener('fetch',e=>{
-  const url = new URL(e.request.url);
+  const req = e.request;
+  const url = new URL(req.url);
   const sameOrigin = url.origin === location.origin;
+
+  // 規則 1：同源的語言檔（.traineddata / .traineddata.gz）一律走網路優先且不使用快取
+  const isTessdata = sameOrigin && /\/assets\/tessdata\/(.*\.(traineddata|traineddata\.gz))$/i.test(url.pathname);
+  if (isTessdata){
+    e.respondWith(
+      fetch(new Request(req, { cache: 'no-store' })).catch(()=>caches.match(req))
+    );
+    return;
+  }
+
+  // 規則 2：index.html 採「網路優先」，避免舊版快取造成卡住
+  const isIndexHtml = sameOrigin && /\/index\.html?$/.test(url.pathname);
+  if (isIndexHtml){
+    e.respondWith(
+      fetch(new Request(req, { cache: 'no-store' }))
+        .then(resp=>{
+          const clone = resp.clone(); caches.open(CACHE).then(c=>c.put(req, clone)); return resp;
+        })
+        .catch(()=> caches.match(req).then(r=> r || caches.match('./index.html')))
+    );
+    return;
+  }
+
+  // 規則 3：其他同源資源仍採「快取優先」
   if (sameOrigin){
     e.respondWith(
-      caches.match(e.request).then(r=>r||fetch(e.request).then(resp=>{
-        const clone=resp.clone(); caches.open(CACHE).then(c=>c.put(e.request,clone)); return resp;
-      }).catch(()=> e.request.mode==='navigate' ? caches.match('./index.html') : Promise.reject()))
+      caches.match(req).then(r=> r || fetch(req).then(resp=>{
+        const clone = resp.clone(); caches.open(CACHE).then(c=>c.put(req, clone)); return resp;
+      }).catch(()=> req.mode==='navigate' ? caches.match('./index.html') : Promise.reject()))
     );
-  } else {
-    e.respondWith(fetch(e.request));
+    return;
   }
+
+  // 規則 4：跨源資源直接走網路
+  e.respondWith(fetch(req));
 });
