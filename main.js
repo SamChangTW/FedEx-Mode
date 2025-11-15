@@ -70,6 +70,19 @@ let _scanActive = false;
 const _qs = new URLSearchParams(location.search);
 const _scanDebug = _qs.get('debugScan') === '1';
 
+// Some ZXing UMD builds may not include the static helper
+// BrowserMultiFormatReader.listVideoInputDevices(). To avoid
+// runtime errors, we rely on the Web MediaDevices API directly.
+async function listVideoInputDevicesCompat(){
+  if (!navigator.mediaDevices || !navigator.mediaDevices.enumerateDevices) return [];
+  try{
+    const devices = await navigator.mediaDevices.enumerateDevices();
+    return devices.filter(d => d.kind === 'videoinput');
+  }catch{
+    return [];
+  }
+}
+
 function stopBarcodeScan(){
   try{
     _scanActive = false;
@@ -220,7 +233,8 @@ async function startBarcodeScan(){
     // 先請求一次權限（可提早觸發權限提示）
     try { await navigator.mediaDevices.getUserMedia({ video: true }); } catch(_e) { /* 若使用者拒絕，後續會在 decode 流程顯示錯誤 */ }
 
-    const devices = await ZXing.BrowserMultiFormatReader.listVideoInputDevices();
+    // Prefer native enumerateDevices for compatibility across ZXing builds
+    const devices = await listVideoInputDevicesCompat();
     if (!devices || devices.length===0){
       const msg = '找不到可用的相機裝置（可能被其他 App 佔用，或此裝置無相機）。';
       if (barcodeStatus) barcodeStatus.textContent = msg;
