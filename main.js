@@ -13,6 +13,9 @@ const btnScanStart = $("btnScanStart");
 const btnScanStop = $("btnScanStop");
 const barcodeVideo = $("barcodeVideo");
 const barcodeStatus = $("barcodeStatus");
+const btnSwitchCamera = $("btnSwitchCamera");
+const btnDecodeImage = $("btnDecodeImage");
+const imgDecodeInput = $("imgDecodeInput");
 
 const awb = $("awb");
 const dateEl = $("date");
@@ -69,6 +72,9 @@ let _codeReader = null;
 let _scanActive = false;
 const _qs = new URLSearchParams(location.search);
 const _scanDebug = _qs.get('debugScan') === '1';
+let _videoDevices = [];
+let _deviceIndex = 0;
+let _selectedDeviceId = null;
 
 // Some ZXing UMD builds may not include the static helper
 // BrowserMultiFormatReader.listVideoInputDevices(). To avoid
@@ -203,7 +209,7 @@ function parseFedExPdf417(rawBytes, text){
   }
 }
 
-async function startBarcodeScan(){
+async function startBarcodeScan(deviceIdOverride){
   // 基本環境檢查（HTTPS/localhost + 相機 API）
   const secure = (window.isSecureContext === true) || /^https:/i.test(location.protocol) || /^(localhost|127\.0\.0\.1)$/i.test(location.hostname);
   if (!secure){
@@ -234,18 +240,30 @@ async function startBarcodeScan(){
     try { await navigator.mediaDevices.getUserMedia({ video: true }); } catch(_e) { /* 若使用者拒絕，後續會在 decode 流程顯示錯誤 */ }
 
     // Prefer native enumerateDevices for compatibility across ZXing builds
-    const devices = await listVideoInputDevicesCompat();
-    if (!devices || devices.length===0){
+    // 重新列舉裝置（授權後 label 會出現）
+    _videoDevices = await listVideoInputDevicesCompat();
+    if (!_videoDevices || _videoDevices.length===0){
       const msg = '找不到可用的相機裝置（可能被其他 App 佔用，或此裝置無相機）。';
       if (barcodeStatus) barcodeStatus.textContent = msg;
       alert(msg);
       _scanActive = false;
       return;
     }
-    // 嘗試選擇後鏡頭（label 含 back/environment）
-    let deviceId = devices[0]?.deviceId;
-    const back = devices.find(d=>/back|environment/i.test(d.label||''));
-    if (back) deviceId = back.deviceId;
+    // 嘗試選擇後鏡頭（label 含 back/environment），或沿用 override/已選擇裝置
+    let deviceId = deviceIdOverride || _selectedDeviceId;
+    if (!deviceId){
+      const back = _videoDevices.find(d=>/back|environment/i.test(d.label||''));
+      deviceId = back ? back.deviceId : _videoDevices[0]?.deviceId;
+      _deviceIndex = Math.max(0, _videoDevices.findIndex(d=>d.deviceId===deviceId));
+    } else {
+      const idx = _videoDevices.findIndex(d=>d.deviceId===deviceId);
+      _deviceIndex = idx >= 0 ? idx : 0;
+    }
+    _selectedDeviceId = deviceId;
+    if (barcodeStatus){
+      const label = _videoDevices[_deviceIndex]?.label || `camera#${_deviceIndex+1}`;
+      barcodeStatus.textContent = `啟用相機中…（${label}，共 ${_videoDevices.length} 台）`;
+    }
 
     // 限定常見格式，降低誤判與提升速度
     const hints = new Map();
@@ -265,29 +283,7 @@ async function startBarcodeScan(){
       if (result) {
         const text = result.getText();
         if (barcodeStatus) barcodeStatus.textContent = `解碼成功：${text.slice(0,80)}${text.length>80?'…':''}`;
-        // 映射欄位
-        const raw = (typeof result.getRawBytes==='function') ? result.getRawBytes() : null;
-        // 先用一般鍵值/數字規則，再用 FedEx PDF417 解析器補強
-        const parsed = Object.assign({}, parseBarcodePayload(text), parseFedExPdf417(raw, text));
-        if (parsed.awb) awb.value = parsed.awb;
-        if (parsed.date) dateEl.value = parsed.date;
-        if (parsed.seller) seller.value = parsed.seller;
-        if (parsed.sellerAddr) sellerAddr.value = parsed.sellerAddr;
-        if (parsed.buyer) buyer.value = parsed.buyer;
-        if (parsed.buyerAddr) buyerAddr.value = parsed.buyerAddr;
-        if (parsed.desc) desc.value = parsed.desc.replace(/^\d+\s*[:\-]\s*/,'');
-        if (parsed.amount) amount.value = parsed.amount;
-        if (parsed.weight) weight.value = parsed.weight;
-        if (_scanDebug && barcodeStatus){
-          const hex = raw && raw.length ? Array.from(raw).slice(0,64).map(b=>b.toString(16).padStart(2,'0')).join(' ') : 'n/a';
-          barcodeStatus.textContent += `\n[debug] bytes: ${raw?raw.length:0}, hex(64): ${hex}`;
-          barcodeStatus.textContent += `\n[parsed] AWB=${parsed.awb||''} | buyer=${parsed.buyer||''} | buyerAddr=${(parsed.buyerAddr||'').replace(/\n/g,' / ')} | seller=${parsed.seller||''}`;
-        }
-        // 取得 AWB 後可自動停止（避免重複觸發）
-        if (parsed.awb) {
-          stopBarcodeScan();
-          if (barcodeStatus) barcodeStatus.textContent = `已帶入 AWB：${parsed.awb}`;
-        }
+        applyDecodedResult(result);
       } else if (err && !(err instanceof ZXing.NotFoundException)) {
         if (barcodeStatus) barcodeStatus.textContent = `解碼中…（${err?.name||'等待'}）`;
       } else {
@@ -303,6 +299,116 @@ async function startBarcodeScan(){
 
 if (btnScanStart) btnScanStart.addEventListener('click', startBarcodeScan);
 if (btnScanStop) btnScanStop.addEventListener('click', stopBarcodeScan);
+if (btnSwitchCamera) {
+  btnSwitchCamera.addEventListener('click', async () => {
+    try{
+      // 停止目前串流
+      stopBarcodeScan();
+      // 循環下一個裝置
+      if (!_videoDevices || _videoDevices.length===0) _videoDevices = await listVideoInputDevicesCompat();
+      if (!_videoDevices || _videoDevices.length===0){
+        alert('尚未取得相機裝置清單');
+        return;
+      }
+      _deviceIndex = (_deviceIndex + 1) % _videoDevices.length;
+      _selectedDeviceId = _videoDevices[_deviceIndex].deviceId;
+      if (barcodeStatus){
+        const label = _videoDevices[_deviceIndex].label || `camera#${_deviceIndex+1}`;
+        barcodeStatus.textContent = `切換鏡頭：${label}`;
+      }
+      await startBarcodeScan(_selectedDeviceId);
+    }catch(e){
+      console.error(e);
+      if (barcodeStatus) barcodeStatus.textContent = `切換鏡頭失敗：${e?.message||e}`;
+    }
+  });
+}
+
+// 通用的解碼結果處理：解析欄位並帶入
+function applyDecodedResult(result){
+  try{
+    const text = typeof result === 'string' ? result : (result?.getText ? result.getText() : '');
+    const raw = (result && typeof result.getRawBytes==='function') ? result.getRawBytes() : null;
+    // 先用一般鍵值/數字規則，再用 FedEx PDF417 解析器補強
+    const parsed = Object.assign({}, parseBarcodePayload(text), parseFedExPdf417(raw, text));
+    if (parsed.awb) awb.value = parsed.awb;
+    if (parsed.date) dateEl.value = parsed.date;
+    if (parsed.seller) seller.value = parsed.seller;
+    if (parsed.sellerAddr) sellerAddr.value = parsed.sellerAddr;
+    if (parsed.buyer) buyer.value = parsed.buyer;
+    if (parsed.buyerAddr) buyerAddr.value = parsed.buyerAddr;
+    if (parsed.desc) desc.value = parsed.desc.replace(/^\d+\s*[:\-]\s*/,'');
+    if (parsed.amount) amount.value = parsed.amount;
+    if (parsed.weight) weight.value = parsed.weight;
+    if (_scanDebug && barcodeStatus){
+      const hex = raw && raw.length ? Array.from(raw).slice(0,64).map(b=>b.toString(16).padStart(2,'0')).join(' ') : 'n/a';
+      barcodeStatus.textContent += `\n[debug] bytes: ${raw?raw.length:0}, hex(64): ${hex}`;
+      barcodeStatus.textContent += `\n[parsed] AWB=${parsed.awb||''} | buyer=${parsed.buyer||''} | buyerAddr=${(parsed.buyerAddr||'').replace(/\n/g,' / ')} | seller=${parsed.seller||''}`;
+    }
+    if (parsed.awb && barcodeStatus){
+      barcodeStatus.textContent = `已帶入 AWB：${parsed.awb}`;
+    }
+    return parsed;
+  }catch(e){
+    console.error(e);
+    if (barcodeStatus) barcodeStatus.textContent = `結果處理失敗：${e?.message||e}`;
+  }
+}
+
+// 從相片解碼（單張圖）
+async function decodeFromImageFile(file){
+  if (!file) return;
+  if (!window.ZXing || !ZXing.BrowserMultiFormatReader){
+    alert('尚未載入條碼掃描元件，請檢查網路或稍後再試。');
+    return;
+  }
+  try{
+    const reader = new FileReader();
+    const dataUrl = await new Promise((res, rej)=>{
+      reader.onerror = () => rej(reader.error||new Error('讀取圖片失敗'));
+      reader.onload = () => res(reader.result);
+      reader.readAsDataURL(file);
+    });
+    const img = new Image();
+    await new Promise((res, rej)=>{
+      img.onload = () => res(true);
+      img.onerror = () => rej(new Error('載入圖片失敗'));
+      img.src = dataUrl;
+    });
+    if (barcodeStatus) barcodeStatus.textContent = '從相片解碼中…';
+    const hints = new Map();
+    hints.set(ZXing.DecodeHintType.POSSIBLE_FORMATS, [
+      ZXing.BarcodeFormat.CODE_128,
+      ZXing.BarcodeFormat.CODE_39,
+      ZXing.BarcodeFormat.ITF,
+      ZXing.BarcodeFormat.QR_CODE,
+      ZXing.BarcodeFormat.DATA_MATRIX,
+      ZXing.BarcodeFormat.PDF_417,
+    ]);
+    const reader2 = new ZXing.BrowserMultiFormatReader(hints);
+    const result = await reader2.decodeFromImage(img);
+    if (result){
+      if (barcodeStatus) barcodeStatus.textContent = `從相片解碼成功：${result.getText().slice(0,80)}${result.getText().length>80?'…':''}`;
+      applyDecodedResult(result);
+    } else {
+      if (barcodeStatus) barcodeStatus.textContent = '未能從相片解出條碼';
+    }
+  }catch(e){
+    console.error(e);
+    if (barcodeStatus) barcodeStatus.textContent = `從相片解碼失敗：${e?.message||e}`;
+  }
+}
+
+if (btnDecodeImage && imgDecodeInput){
+  btnDecodeImage.addEventListener('click', ()=>{
+    try{ imgDecodeInput.click(); }catch{}
+  });
+  imgDecodeInput.addEventListener('change', (ev)=>{
+    const f = ev.target?.files?.[0];
+    if (f) decodeFromImageFile(f);
+    imgDecodeInput.value = '';
+  });
+}
 
 // 已取消 OCR：僅在舊連結仍帶有按鈕時避免報錯
 if (btnOcr) {
