@@ -109,6 +109,7 @@
       setTimeout(loadFallback, 1000);
     })();
   </script>
-  <script src="main.js"></script>
+  <!-- 加上版本參數以避免舊版快取（與 SW 的新規則相呼應） -->
+  <script src="main.js?v=r11"></script>
 </body>
 </html>

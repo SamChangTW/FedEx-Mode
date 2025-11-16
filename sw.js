@@ -1,4 +1,4 @@
-const CACHE='fedex-ocr-r10';
+const CACHE='fedex-ocr-r11';
 const ASSETS=[
   './','./index.html','./style.css','./main.js','./manifest.json',
   './assets/fedex-commercial-invoice-form-tw.pdf'
@@ -75,9 +75,10 @@ self.addEventListener('fetch',e=>{
     return;
   }
 
-  // 規則 2：index.html 採「網路優先」，避免舊版快取造成卡住
+  // 規則 2：index.html 與 main.js 採「網路優先」，避免舊版快取造成卡住
   const isIndexHtml = sameOrigin && /\/index\.html?$/.test(url.pathname);
-  if (isIndexHtml){
+  const isMainJs = sameOrigin && /\/main\.js(\?.*)?$/.test(url.pathname);
+  if (isIndexHtml || isMainJs){
     e.respondWith(
       fetch(new Request(req, { cache: 'no-store' }))
         .then(resp=>{
