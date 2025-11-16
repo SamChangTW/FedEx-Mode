@@ -16,6 +16,7 @@ const barcodeStatus = $("barcodeStatus");
 const btnSwitchCamera = $("btnSwitchCamera");
 const btnDecodeImage = $("btnDecodeImage");
 const imgDecodeInput = $("imgDecodeInput");
+const btnHidToggle = $("btnHidToggle");
 
 const awb = $("awb");
 const dateEl = $("date");
@@ -75,6 +76,66 @@ const _scanDebug = _qs.get('debugScan') === '1';
 let _videoDevices = [];
 let _deviceIndex = 0;
 let _selectedDeviceId = null;
+// ===== HID（鍵盤掃碼器）狀態 =====
+let _hidActive = false;
+let _hidBuffer = '';
+let _hidTimer = null;
+
+function _hidFlush(){
+  if (!_hidBuffer) return;
+  const text = _hidBuffer.trim();
+  _hidBuffer = '';
+  if (!text) return;
+  try{
+    if (barcodeStatus) barcodeStatus.textContent = `鍵盤掃碼：${text.slice(0,80)}${text.length>80?'…':''}`;
+    applyDecodedResult(text);
+  }catch(e){ console.error(e); }
+}
+
+function _hidOnKeydown(ev){
+  if (!_hidActive) return;
+  const k = ev.key;
+  // 允許 Esc 清除緩衝
+  if (k === 'Escape'){
+    _hidBuffer = '';
+    if (barcodeStatus) barcodeStatus.textContent = '鍵盤掃碼器：已清除';
+    ev.preventDefault();
+    return;
+  }
+  // Enter/Tab 作為掃碼結束
+  if (k === 'Enter' || k === 'Tab'){
+    ev.preventDefault();
+    clearTimeout(_hidTimer); _hidTimer = null;
+    _hidFlush();
+    return;
+  }
+  // 忽略組合鍵與非可列印鍵
+  if (ev.ctrlKey || ev.altKey || ev.metaKey) return;
+  if (k.length !== 1) return;
+  // 累積字元並阻止輸入到欄位
+  ev.preventDefault();
+  _hidBuffer += k;
+  clearTimeout(_hidTimer);
+  _hidTimer = setTimeout(_hidFlush, 220);
+}
+
+function setHidActive(on){
+  const wantOn = !!on;
+  if (wantOn === _hidActive) return;
+  _hidActive = wantOn;
+  try{
+    if (_hidActive){
+      window.addEventListener('keydown', _hidOnKeydown, { capture: true });
+      if (barcodeStatus) barcodeStatus.textContent = '鍵盤掃碼器：已啟用（請在此頁直接掃碼）';
+      if (btnHidToggle) btnHidToggle.textContent = '停用鍵盤掃碼器';
+    } else {
+      window.removeEventListener('keydown', _hidOnKeydown, { capture: true });
+      if (barcodeStatus) barcodeStatus.textContent = '鍵盤掃碼器：已停用';
+      if (btnHidToggle) btnHidToggle.textContent = '啟用鍵盤掃碼器';
+      clearTimeout(_hidTimer); _hidTimer = null; _hidBuffer = '';
+    }
+  }catch(e){ console.error(e); }
+}
 
 // Some ZXing UMD builds may not include the static helper
 // BrowserMultiFormatReader.listVideoInputDevices(). To avoid
@@ -407,6 +468,13 @@ if (btnDecodeImage && imgDecodeInput){
     const f = ev.target?.files?.[0];
     if (f) decodeFromImageFile(f);
     imgDecodeInput.value = '';
+  });
+}
+
+// HID 掃碼器開關
+if (btnHidToggle){
+  btnHidToggle.addEventListener('click', ()=>{
+    setHidActive(!_hidActive);
   });
 }
 

@@ -26,10 +26,14 @@
         <button id="btnScanStop" type="button">停止掃描</button>
         <button id="btnSwitchCamera" type="button">切換鏡頭</button>
         <button id="btnDecodeImage" type="button">從相片解碼</button>
+        <button id="btnHidToggle" type="button">啟用鍵盤掃碼器</button>
         <small id="barcodeStatus" style="opacity:.8"></small>
       </div>
-      <video id="barcodeVideo" playsinline style="width:100%;max-height:220px;display:none;background:#000;border-radius:8px"></video>
+      <video id="barcodeVideo" playsinline muted autoplay style="width:100%;max-height:220px;display:none;background:#000;border-radius:8px"></video>
       <input id="imgDecodeInput" type="file" accept="image/*" capture="environment" style="display:none" />
+      <small style="display:block;opacity:.7;margin-top:4px;line-height:1.4;">
+        小提示：若相機黑屏，可改用「從相片解碼」或外接藍牙/USB 條碼槍並按「啟用鍵盤掃碼器」。
+      </small>
       <!-- 已取消 OCR，保留純掃描與手動輸入流程 -->
     </section>
 
