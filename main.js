@@ -1,22 +1,20 @@
 // v1.7M-F-W-R2 Mobile (ZH-TW) — Uses "v1.7M 原始制式表格" style for PDF layout
 const $ = (id) => document.getElementById(id);
 
-const fileInput = $("fileInput");
-const btnCamera = $("btnCamera");
-const btnOcr = $("btnOcr");
-const ocrProgress = $("ocrProgress");
-const ocrStatus = $("ocrStatus");
-const ocrText = $("ocrText");
-const preview = $("preview");
-// Barcode scan UI
-const btnScanStart = $("btnScanStart");
-const btnScanStop = $("btnScanStop");
-const barcodeVideo = $("barcodeVideo");
-const barcodeStatus = $("barcodeStatus");
-const btnSwitchCamera = $("btnSwitchCamera");
-const btnDecodeImage = $("btnDecodeImage");
-const imgDecodeInput = $("imgDecodeInput");
-const btnHidToggle = $("btnHidToggle");
+// Legacy OCR/preview controls are removed in the new flow
+const fileInput = null;
+const btnCamera = null;
+const btnOcr = null;
+const ocrProgress = null;
+const ocrStatus = null;
+const ocrText = null;
+const preview = null;
+// New Camera + Text + NER UI
+const btnCameraText = $("btnCameraText");
+const btnRunNER = $("btnRunNER");
+const photoInput = $("photoInput");
+const rawText = $("rawText");
+const textExtractStatus = $("textExtractStatus");
 
 const awb = $("awb");
 const dateEl = $("date");
@@ -28,6 +26,9 @@ const desc = $("desc");
 const amount = $("amount");
 const weight = $("weight");
 const pieces = $("pieces");
+const countryEl = $("country");
+const postalCodeEl = $("postalCode");
+const phoneEl = $("phone");
 
 const btnPdf = $("btnPdf");
 const outStatus = $("outStatus");
@@ -39,12 +40,24 @@ const useFedExTpl = $("useFedExTpl");
 const tplInput = $("tplInput");
 const tplRow = $("tplRow");
 
-// Camera shortcut（已取消 OCR，僅在元件存在時啟用，避免報錯）
-if (btnCamera && fileInput) {
-  btnCamera.addEventListener("click", () => {
-    fileInput.setAttribute("capture", "environment");
-    fileInput.click();
-    setTimeout(() => fileInput.removeAttribute("capture"), 1000);
+// Dummies for removed legacy scanning/HID UI to avoid reference errors in legacy blocks
+const btnScanStart = null;
+const btnScanStop = null;
+const barcodeVideo = null;
+const barcodeStatus = null;
+const btnSwitchCamera = null;
+const btnDecodeImage = null;
+const imgDecodeInput = null;
+const btnHidToggle = null;
+
+// New: Camera capture → text extraction
+if (btnCameraText && photoInput) {
+  btnCameraText.addEventListener("click", () => {
+    try {
+      photoInput.setAttribute("capture", "environment");
+      photoInput.click();
+      setTimeout(() => photoInput.removeAttribute("capture"), 800);
+    } catch {}
   });
 }
 
@@ -58,28 +71,332 @@ if (useFedExTpl && tplRow) {
   syncTplRow();
 }
 
-if (fileInput) {
-  fileInput.addEventListener("change", (e) => {
+// Handle photo selection → extract text → put into textarea
+if (photoInput) {
+  photoInput.addEventListener("change", async (e) => {
     const file = e.target.files?.[0];
     if (!file) return;
-    const reader = new FileReader();
-    reader.onload = () => { if (preview) preview.src = reader.result; };
-    reader.readAsDataURL(file);
+    try {
+      setStatus('讀取圖片中…');
+      const { canvas } = await loadImageToCanvas(file);
+      setStatus('擷取文字中…');
+      const txt = await extractTextFromImage(canvas);
+      rawText.value = (txt || '').trim();
+      setStatus(txt && txt.trim() ? '已擷取文字，請按「使用文字智能帶入（NER）」' : '未擷取到可用文字，請嘗試較清晰的照片');
+    } catch (err) {
+      console.error(err);
+      setStatus('擷取文字失敗：' + (err?.message || err));
+    } finally {
+      photoInput.value = '';
+    }
   });
 }
 
-// ===== 條碼/二維碼掃描（ZXing） =====
-let _codeReader = null;
-let _scanActive = false;
-const _qs = new URLSearchParams(location.search);
-const _scanDebug = _qs.get('debugScan') === '1';
-let _videoDevices = [];
-let _deviceIndex = 0;
-let _selectedDeviceId = null;
-// ===== HID（鍵盤掃碼器）狀態 =====
-let _hidActive = false;
-let _hidBuffer = '';
-let _hidTimer = null;
+// ===== 已移除條碼/二維碼掃描與 HID 掃碼器邏輯（改為相機拍照 + 文字擷取 + NER） =====
+
+// Utility: status helper
+function setStatus(msg){ if (textExtractStatus) textExtractStatus.textContent = msg || ''; }
+
+// Utility: load image/file/URL to canvas
+async function loadImageToCanvas(src){
+  return new Promise((resolve, reject) => {
+    try {
+      const img = new Image();
+      img.onload = () => {
+        const maxW = 1600; // downscale for speed
+        const scale = Math.min(1, maxW / img.width);
+        const w = Math.round(img.width * scale);
+        const h = Math.round(img.height * scale);
+        const canvas = document.createElement('canvas');
+        canvas.width = w; canvas.height = h;
+        const ctx = canvas.getContext('2d');
+        ctx.drawImage(img, 0, 0, w, h);
+        resolve({ canvas, ctx, width:w, height:h });
+      };
+      img.onerror = () => reject(new Error('無法載入圖片'));
+      if (src instanceof File) {
+        const fr = new FileReader();
+        fr.onload = () => { img.src = fr.result; };
+        fr.onerror = () => reject(fr.error||new Error('讀取圖片失敗'));
+        fr.readAsDataURL(src);
+      } else if (typeof src === 'string') {
+        img.src = src;
+      } else if (src && src.toDataURL) {
+        img.src = src.toDataURL('image/png');
+      } else {
+        reject(new Error('不支援的圖片來源'));
+      }
+    } catch (e){ reject(e); }
+  });
+}
+
+// Text extraction: prefer Shape Detection API TextDetector → fallback to OCRAD (lightweight OCR)
+async function extractTextFromImage(canvas){
+  // Try TextDetector if available
+  try {
+    // Some browsers implement as window.TextDetector; if not, skip
+    const TD = window.TextDetector;
+    if (TD) {
+      const detector = new TD();
+      // Convert canvas to bitmap
+      const blob = await new Promise(res => canvas.toBlob(res, 'image/png', 0.92));
+      const bmp = await createImageBitmap(blob);
+      const results = await detector.detect(bmp);
+      if (Array.isArray(results) && results.length){
+        const texts = results.map(r => r.rawValue || r.text || '').filter(Boolean);
+        if (texts.length) return texts.join('\n');
+      }
+    }
+  } catch(e){ /* ignore and fallback */ }
+
+  // Fallback OCR: OCRAD on the canvas
+  try {
+    if (typeof OCRAD === 'function'){
+      return await new Promise((resolve) => {
+        try { resolve(OCRAD(canvas) || ''); } catch { resolve(''); }
+      });
+    }
+  } catch {}
+  return '';
+}
+
+// NER parsing: extract sender/recipient, addresses, phone, postal, country
+function parseTextWithNER(text){
+  const out = {
+    senderName:'', senderCompany:'', senderAddress:'',
+    recipientName:'', recipientCompany:'', recipientAddress:'',
+    phone:'', postalCode:'', country:'',
+    description:'', descriptionConfidence:0
+  };
+  if (!text) return out;
+  const lines = text.split(/\r?\n/).map(s=>s.trim()).filter(Boolean);
+  const whole = lines.join('\n');
+
+  // Phone (intl, allow spaces/dashes)
+  const phoneMatch = whole.match(/(?:TEL|PHONE|聯絡電話|電話)\s*[:：]?\s*([+]?\d[\d\s\-()]{6,}\d)/i) || whole.match(/\b\+?\d[\d\s\-()]{6,}\d\b/);
+  if (phoneMatch) out.phone = phoneMatch[1] ? phoneMatch[1].trim() : phoneMatch[0].trim();
+
+  // Postal code (3–6 digits; TW often 3 or 5, US 5, etc.)
+  const postalMatch = whole.match(/(?:POSTAL\s*CODE|ZIP|郵遞區號)\s*[:：]?\s*(\d{3,6})\b/i) || whole.match(/\b(\d{3,6})\b(?!.*\b(\d{3,6})\b)/);
+  if (postalMatch) out.postalCode = postalMatch[1] || postalMatch[0];
+
+  // Country detection (simple dictionary + ISO)
+  const countryList = [
+    'Taiwan','Republic of China','ROC','Taipei','Taiwan, Province of China','United States','USA','US','America','United Kingdom','UK','GB','Great Britain','China','PRC','Japan','JP','Korea','KR','South Korea','Republic of Korea','Canada','CA','Australia','AU','Germany','DE','France','FR','Italy','IT','Spain','ES','Netherlands','NL','Singapore','SG','Hong Kong','HK','Macao','Macau','MO'
+  ];
+  for (const c of countryList){
+    const re = new RegExp(`(^|[^A-Za-z])${c.replace(/\s+/g,'\\s+')}([^A-Za-z]|$)`, 'i');
+    if (re.test(whole)) { out.country = c; break; }
+  }
+  if (!out.country){
+    const iso = whole.match(/\b(TW|US|UK|GB|CN|JP|KR|CA|AU|DE|FR|IT|ES|NL|SG|HK|MO)\b/);
+    if (iso) out.country = iso[1];
+  }
+
+  // Identify sender/recipient blocks by cues (EN/ZH)
+  const idxSender = lines.findIndex(l=>/(寄件人|發件人|Sender|From|Shipper|Consignor)/i.test(l));
+  const idxRecipient = lines.findIndex(l=>/(收件人|收貨人|Recipient|To|Ship\s*-?\s*To|Consignee)/i.test(l));
+
+  const sliceBlock = (startIdx) => {
+    if (startIdx < 0) return [];
+    const out = [];
+    for (let i=startIdx+1;i<Math.min(lines.length, startIdx+8);i++){
+      const s = lines[i];
+      if (/(寄件人|發件人|Sender|From|Shipper|Consignor|收件人|收貨人|Recipient|To|Ship\s*-?\s*To|Consignee|Invoice|Description|Amount|重量|Weight|Pieces|件數)/i.test(s)) break;
+      out.push(s);
+    }
+    return out;
+  };
+
+  const senderBlock = sliceBlock(idxSender);
+  const recipientBlock = sliceBlock(idxRecipient);
+
+  // Heuristics: first line likely name/company; subsequent lines address
+  const parseNameAddr = (block) => {
+    if (!block || !block.length) return { name:'', company:'', address:'' };
+    const first = block[0];
+    const second = block[1] || '';
+    // If first line contains Co., Ltd., Inc., 公司, 股份, 有限, treat as company
+    const isCompany = /(CO\.?|INC\.?|LTD\.?|LLC|有限公司|股份|公司|集團|CORP\.?)/i.test(first);
+    const name = isCompany ? second : first;
+    const company = isCompany ? first : '';
+    const rest = isCompany ? block.slice(2) : block.slice(1);
+    const address = rest.join('\n');
+    return { name: (name||'').trim(), company: (company||'').trim(), address: address.trim() };
+  };
+
+  const sNA = parseNameAddr(senderBlock);
+  const rNA = parseNameAddr(recipientBlock);
+  out.senderName = sNA.name; out.senderCompany = sNA.company; out.senderAddress = sNA.address;
+  out.recipientName = rNA.name; out.recipientCompany = rNA.company; out.recipientAddress = rNA.address;
+
+  // If still missing, try generic address/name heuristics
+  if (!out.recipientAddress){
+    const cityZipLine = lines.find(l => /(CITY|TOWNSHIP|COUNTY|DISTRICT|VILLAGE|TOWN|CITY\s*\d{2}|[A-Z]{2,})\s+\d{3,6}(?:\s+[A-Z]{2})?$/i.test(l));
+    if (cityZipLine){
+      const idx = lines.indexOf(cityZipLine);
+      const addrLines = [];
+      if (lines[idx-1]) addrLines.unshift(lines[idx-1]);
+      if (lines[idx-2]) addrLines.unshift(lines[idx-2]);
+      out.recipientAddress = [...addrLines, cityZipLine].join('\n');
+      const nm = lines[idx-3] || lines[idx-2];
+      if (nm && /[\p{L}A-Za-z]/u.test(nm)) out.recipientName = out.recipientName || nm;
+    }
+  }
+
+  // Semantic item description extraction (goods/commodity)
+  try {
+    const descEnt = extractShipmentDescriptionSemantic({
+      text: whole,
+      lines,
+      excludeBlocks: {
+        sender: senderBlock,
+        recipient: recipientBlock
+      }
+    });
+    if (descEnt && descEnt.value && descEnt.confidence >= 3) {
+      out.description = descEnt.value;
+      out.descriptionConfidence = descEnt.confidence;
+    }
+  } catch(e){ /* best-effort; ignore */ }
+
+  return out;
+}
+
+// --- Semantic shipment description extractor ---
+// Best-effort, rule-based NP detection with scoring and safety threshold
+function extractShipmentDescriptionSemantic(ctx){
+  const text = (ctx?.text || '').trim();
+  const lines = Array.isArray(ctx?.lines) ? ctx.lines : text.split(/\r?\n/).map(s=>s.trim());
+  if (!text) return { value:'', confidence:0 };
+
+  // Utility lexicons and helpers
+  const GOODS_LEXICON = [
+    'paperboard box','carton','box','documents','document','papers','commercial goods','merchandise','goods','electronics','electronic','device','devices','clothing sample','sample','samples','garment','clothing','accessories','accessory','parts','spare parts','gift','return','parcel','package','packages','watch','bag','bags','shoes','book','books','stationery','toy','toys','component','components'
+  ];
+  const QTY_CUES_RE = /\b(?:\d+[\d.,]*\s*)?(?:pcs?|pieces?|units?|unit|boxes|box|cartons?|ctn|pkg|packages?|set|sets|kg|g|lb|lbs)\b/i;
+  const ADDRESS_CUES_RE = /(street|st\.?|road|rd\.?|avenue|ave\.?|blvd\.?|lane|ln\.?|drive|dr\.?|district|city|county|state|province|zip|postal|floor|fl\.|suite|ste\.|號|路|街|巷|弄|樓|市|區|鄉|鎮)/i;
+  const NAME_CUES_RE = /(Mr\.?|Ms\.?|Mrs\.?|先生|小姐|公司|股份|有限公司|CO\.?|INC\.?|LTD\.?|LLC|CORP\.?)/i;
+  const PHONE_RE = /\+?\d[\d\s\-()]{6,}\d/;
+  const EMAIL_RE = /[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i;
+
+  // Build an exclude set of lines from sender/recipient blocks
+  const excludeSet = new Set();
+  const addToExclude = (arr)=>{ (arr||[]).forEach(s=>{ if (s) excludeSet.add(s.trim()); }); };
+  if (ctx?.excludeBlocks){ addToExclude(ctx.excludeBlocks.sender); addToExclude(ctx.excludeBlocks.recipient); }
+
+  // Generate candidates from lines by splitting at obvious labels and punctuation
+  const candList = [];
+  const pushCand = (value, lineIdx, origin) => {
+    const v = (value||'').trim().replace(/^[-:•·*\s]+/, '').replace(/\s{2,}/g,' ');
+    if (!v) return;
+    // Very short (1 char) or extremely long (>80) are unlikely item names
+    if (v.length < 2 || v.length > 80) return;
+    // Filter out address-like, phone/email, and fields labels
+    if (PHONE_RE.test(v) || EMAIL_RE.test(v)) return;
+    if (/^(sender|from|shipper|to|recipient|consignee|address|addr|invoice|amount|weight|pieces|awb|tracking|trk)/i.test(v)) return;
+    candList.push({ value: v, lineIdx, origin });
+  };
+
+  lines.forEach((ln, i)=>{
+    const raw = (ln||'').trim();
+    if (!raw) return;
+    if (excludeSet.has(raw)) return;
+    if (PHONE_RE.test(raw) || EMAIL_RE.test(raw)) return;
+    // Ignore pure numeric or address-like lines
+    if (/^\d{3,}$/.test(raw)) return;
+    // Split by common delimiters or labels
+    const cleaned = raw.replace(/\b(description|contents?|商品|品名|物品|貨品|內容)\b\s*[:：]/i, ' ');
+    const parts = cleaned.split(/[\|,/;]+|\s{2,}/).map(s=>s.trim()).filter(Boolean);
+    if (parts.length === 0) return;
+
+    // If a part contains quantity cue, treat adjacent words as candidates first
+    const qtyHit = QTY_CUES_RE.test(raw);
+    if (qtyHit){
+      // Try pattern like "2 pcs electronics" or "electronics 2 pcs"
+      const m1 = raw.match(/\b(\d+[\d.,]*)\s*(pcs?|pieces?|units?|boxes?|cartons?|kg|g|lb|lbs)\b\s*([A-Za-z][\w \-]{1,60})/i);
+      if (m1) pushCand(m1[3], i, 'qty-tail');
+      const m2 = raw.match(/([A-Za-z][\w \-]{1,60})\s*\b(\d+[\d.,]*)\s*(pcs?|pieces?|units?|boxes?|cartons?|kg|g|lb|lbs)\b/i);
+      if (m2) pushCand(m2[1], i, 'qty-head');
+    }
+
+    // General NP-like chunks: prefer 1–5 words, alphabetic or mixed
+    parts.forEach(p=>{
+      const words = p.split(/\s+/).filter(Boolean);
+      if (words.length === 0 || words.length > 6) return;
+      // Must contain at least one letter
+      if (!/[A-Za-z\p{L}]/u.test(p)) return;
+      pushCand(p, i, 'part');
+    });
+  });
+
+  // Scoring
+  const lowerText = text.toLowerCase();
+  const scoreCand = (c)=>{
+    let s = 1; // base
+    const vLow = c.value.toLowerCase();
+    // Lexicon boost
+    if (GOODS_LEXICON.some(g => vLow.includes(g))) s += 2;
+    // Quantity proximity boost: check current, previous, next two lines
+    for (let d=-2; d<=2; d++){
+      const li = c.lineIdx + d;
+      if (li>=0 && li<lines.length && QTY_CUES_RE.test(lines[li]||'')) { s += (d===0?2:1); break; }
+    }
+    // Penalize address-like tokens
+    if (ADDRESS_CUES_RE.test(c.value)) s -= 2;
+    // Penalize name/company-like tokens
+    if (NAME_CUES_RE.test(c.value)) s -= 1;
+    // Prefer reasonable length 3–30
+    if (c.value.length >= 3 && c.value.length <= 30) s += 1;
+    // Avoid all-caps long strings (likely headings)
+    if (c.value.length > 12 && c.value === c.value.toUpperCase()) s -= 1;
+    return s;
+  };
+
+  let best = null;
+  for (const c of candList){
+    const sc = scoreCand(c);
+    if (!best || sc > best.score) best = { ...c, score: sc };
+  }
+  if (!best || best.score < 3) return { value:'', confidence: best ? best.score : 0 };
+
+  // Clean leading labels and units artifacts again
+  let val = best.value.replace(/^(contents?|description|desc|品名|貨品|內容)\s*[:：\-]\s*/i, '').trim();
+  val = val.replace(/\b(kg|g|lb|lbs|pcs?|pieces?|units?)\b/ig, '').replace(/\s{2,}/g,' ').trim();
+  // Title-case mild normalization while preserving acronyms
+  const title = val.split(' ').map(w=>{
+    if (/^[A-Z0-9]{2,}$/.test(w)) return w; // keep acronyms
+    return w.charAt(0).toUpperCase() + w.slice(1);
+  }).join(' ');
+  return { value: title || val, confidence: best.score };
+}
+
+function fillFieldsFromEntities(ent){
+  if (!ent) return;
+  // Only auto-fill the allowed fields
+  if (seller && (ent.senderCompany || ent.senderName)) seller.value = (ent.senderCompany || ent.senderName || '').trim();
+  if (sellerAddr && ent.senderAddress) sellerAddr.value = ent.senderAddress;
+  if (buyer && (ent.recipientCompany || ent.recipientName)) buyer.value = (ent.recipientCompany || ent.recipientName || '').trim();
+  if (buyerAddr && ent.recipientAddress) buyerAddr.value = ent.recipientAddress;
+  if (countryEl && ent.country) countryEl.value = ent.country;
+  if (postalCodeEl && ent.postalCode) postalCodeEl.value = ent.postalCode;
+  if (phoneEl && ent.phone) phoneEl.value = ent.phone;
+  // Description: only fill when confident; do not overwrite non-empty user input
+  if (desc && ent.description && (desc.value || '').trim() === '' && (ent.descriptionConfidence||0) >= 3) {
+    desc.value = ent.description;
+  }
+}
+
+// Wire NER button
+if (btnRunNER && rawText){
+  btnRunNER.addEventListener('click', () => {
+    const text = (rawText.value||'').trim();
+    if (!text){ setStatus('請先拍照或貼上文字，再執行 NER'); return; }
+    const ent = parseTextWithNER(text);
+    fillFieldsFromEntities(ent);
+    setStatus('已完成智能帶入。請檢查欄位。');
+  });
+}
 
 function _hidFlush(){
   if (!_hidBuffer) return;
@@ -1206,11 +1523,13 @@ if (btnRemap){
 }
   if (btnClear){
     btnClear.addEventListener('click', () => {
-    for (const el of [awb, dateEl, seller, sellerAddr, buyer, buyerAddr, desc, amount, weight, pieces]){
-      if (el) el.value = "";
-    }
-  });
-}
+      for (const el of [awb, dateEl, seller, sellerAddr, buyer, buyerAddr, countryEl, postalCodeEl, phoneEl, desc, amount, weight, pieces]){
+        if (el) el.value = "";
+      }
+      if (rawText) rawText.value = "";
+      setStatus("");
+    });
+  }
 
 btnPdf.addEventListener("click", async () => {
   const data = {

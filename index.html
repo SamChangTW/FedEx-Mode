@@ -20,21 +20,17 @@
 
   <main>
     <section class="card">
-      <h2>1) 掃描／手動輸入</h2>
+      <h2>1) 取像與文字</h2>
       <div class="row" style="gap:8px; align-items:center; flex-wrap:wrap;">
-        <button id="btnScanStart" type="button">啟用條碼/二維碼掃描</button>
-        <button id="btnScanStop" type="button">停止掃描</button>
-        <button id="btnSwitchCamera" type="button">切換鏡頭</button>
-        <button id="btnDecodeImage" type="button">從相片解碼</button>
-        <button id="btnHidToggle" type="button">啟用鍵盤掃碼器</button>
-        <small id="barcodeStatus" style="opacity:.8"></small>
+        <button id="btnCameraText" type="button">啟動相機（拍照取文字）</button>
+        <button id="btnRunNER" type="button">使用文字智能帶入（NER）</button>
+        <small id="textExtractStatus" style="opacity:.8"></small>
       </div>
-      <video id="barcodeVideo" playsinline muted autoplay style="width:100%;max-height:220px;display:none;background:#000;border-radius:8px"></video>
-      <input id="imgDecodeInput" type="file" accept="image/*" capture="environment" style="display:none" />
+      <input id="photoInput" type="file" accept="image/*" capture="environment" style="display:none" />
+      <textarea id="rawText" rows="5" placeholder="將從相片擷取的文字會顯示在此，或可直接貼上（標籤、AWB、發票或螢幕截圖文字）"></textarea>
       <small style="display:block;opacity:.7;margin-top:4px;line-height:1.4;">
-        小提示：若相機黑屏，可改用「從相片解碼」或外接藍牙/USB 條碼槍並按「啟用鍵盤掃碼器」。
+        說明：本流程改為「拍照 → 取文字 → NER 智能解析」。若裝置支援 TextDetector 將離線識別，否則使用輕量 OCR 後再解析。
       </small>
-      <!-- 已取消 OCR，保留純掃描與手動輸入流程 -->
     </section>
 
     <section class="card">
@@ -58,6 +54,15 @@
         <label class="full">收件人地址（Recipient Address）
           <textarea id="buyerAddr" placeholder="街道與門牌號、城市、州/省、郵遞區號、國家" rows="2"></textarea>
         </label>
+        <label>國家（Country）
+          <input id="country" placeholder="例如：Taiwan / 美國 / JP / TW" />
+        </label>
+        <label>郵遞區號（Postal Code）
+          <input id="postalCode" placeholder="例如：100、90210、10110" />
+        </label>
+        <label>電話（Phone）
+          <input id="phone" placeholder="例如：+886 912345678" />
+        </label>
         <label class="full">貨品說明（Description）
           <input id="desc" placeholder="例如：Paperboard Box" />
         </label>
@@ -72,7 +77,6 @@
         </label>
       </div>
       <div class="row">
-        <button id="btnRemap" type="button">重新自動帶入（OCR）</button>
         <button id="btnClear" type="button">清空欄位</button>
       </div>
     </section>
@@ -99,24 +103,11 @@
     <small>Public template · 無簽名 · 無 Logo · 僅必要欄位 · 可離線使用（PWA）</small>
   </footer>
 
-  <!-- 已移除 tesseract.js（OCR 全數取消） -->
+  <!-- 已移除 tesseract.js 與 QR/條碼掃描庫（ZXing）。改用輕量 OCR 與 NER。 -->
   <script src="https://cdn.jsdelivr.net/npm/pdf-lib@1.17.1/dist/pdf-lib.min.js"></script>
-  <!-- ZXing 主來源（unpkg），並在載入後做可用性偵測；若失敗，動態載入 jsDelivr 備援 -->
-  <script src="https://unpkg.com/@zxing/library@0.20.0"></script>
-  <script>
-    (function(){
-      function loadFallback(){
-        if (window.ZXing && window.ZXing.BrowserMultiFormatReader) return;
-        var s = document.createElement('script');
-        s.src = 'https://cdn.jsdelivr.net/npm/@zxing/library@0.20.0';
-        s.async = true;
-        document.head.appendChild(s);
-      }
-      // 若 1 秒後仍未有 ZXing，嘗試載入備援
-      setTimeout(loadFallback, 1000);
-    })();
-  </script>
+  <!-- 輕量 OCR：ocrad.js（用於無 TextDetector 的裝置） -->
+  <script src="https://unpkg.com/ocrad.js/ocrad.min.js"></script>
   <!-- 加上版本參數以避免舊版快取（與 SW 的新規則相呼應） -->
-  <script src="main.js?v=r11"></script>
+  <script src="main.js?v=ner-r1"></script>
 </body>
 </html>
