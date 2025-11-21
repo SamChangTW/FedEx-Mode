@@ -1,0 +1,20 @@
+{
+  "scheduler": {
+    "color-primary": "#2C3E57",
+    "color-secondary": "#1E2A44",
+    "color-background": "#1A1D24",
+    "color-surface": "#242A33",
+    "color-border": "#4B5563",
+    "color-text": "#F3F1ED",
+    "color-accent": "#C8B47E"
+  },
+  "scheduler_midnight_blue": {
+    "color-primary": "#2C3E57",
+    "color-secondary": "#1E2A44",
+    "color-background": "#1A1D24",
+    "color-surface": "#242A33",
+    "color-border": "#4B5563",
+    "color-text": "#F3F1ED",
+    "color-accent": "#C8B47E"
+  }
+}
