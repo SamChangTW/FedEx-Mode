@@ -22,14 +22,12 @@
     <section class="tsaa-card">
       <h2>1) 取像與文字</h2>
       <div class="row" style="gap:8px; align-items:center; flex-wrap:wrap;">
-        <!-- 使用 label for 觸發原生相機選單，避免部分瀏覽器攔截對隱藏 input 的程式化點擊 -->
         <label id="btnCameraText" for="photoInput" role="button" class="tsaa-btn">
           啟動相機（拍照取文字）
         </label>
         <button id="btnRunNER" type="button" class="tsaa-btn">使用文字智能帶入（NER）</button>
         <small id="textExtractStatus" style="opacity:.8"></small>
       </div>
-      <!-- 將 input 隱藏改為視覺隱藏（不使用 display:none），避免某些瀏覽器無法彈出相機選單 -->
       <input id="photoInput" type="file" accept="image/*" capture="environment" style="position:absolute;left:-9999px;width:1px;height:1px;opacity:0;" />
       <textarea id="rawText" rows="5" placeholder="將從相片擷取的文字會顯示在此，或可直接貼上（標籤、AWB、發票或螢幕截圖文字）"></textarea>
       <small style="display:block;opacity:.7;margin-top:4px;line-height:1.4;">
@@ -107,13 +105,9 @@
     <small>Public template · 無簽名 · 無 Logo · 僅必要欄位 · 可離線使用（PWA）</small>
   </footer>
 
-  <!-- 已移除 tesseract.js 與 QR/條碼掃描庫（ZXing）。改用輕量 OCR 與 NER。 -->
   <script src="https://cdn.jsdelivr.net/npm/pdf-lib@1.17.1/dist/pdf-lib.min.js"></script>
-  <!-- 輕量 OCR：ocrad.js（用於無 TextDetector 的裝置） -->
   <script src="https://unpkg.com/ocrad.js/ocrad.min.js"></script>
-  <!-- 加上版本參數以避免舊版快取（與 SW 的新規則相呼應） -->
-  <script src="main.js?v=ner-r1"></script>
-  <!-- TSAA design system: tokens, theme loader, and scheduler components -->
+  <script src="main.js?v=ner-r2"></script>
   <link rel="stylesheet" href="ui/tsaa_tokens.css" />
   <link rel="stylesheet" href="ui/scheduler.css" />
   <script src="ui/theme-loader.js"></script>
