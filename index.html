@@ -3,19 +3,63 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>FedEx 模式｜OCR 商業發票 v1.7M-F-W-R2</title>
+  <title>FedEx 模式｜OCR 商業發票 v1.8-Fix</title>
   <link rel="manifest" href="manifest.json">
   <link rel="stylesheet" href="style.css" />
+  
   <script>
-    if ('serviceWorker' in navigator) {
-      window.addEventListener('load', () => navigator.serviceWorker.register('./sw.js'));
+    // 設定當前版本號 (每次發布新版時，改這個字串就能強制用戶更新)
+    const APP_VERSION = 'v1.8-ner-final-fix';
+
+    // 檢查用戶手機裡的標記是否為最新
+    if (localStorage.getItem('pwa_version') !== APP_VERSION) {
+      console.log('偵測到舊版本，開始強制清理...');
+      
+      // 1. 註銷所有 Service Worker (殺死舊守門員)
+      if ('serviceWorker' in navigator) {
+        navigator.serviceWorker.getRegistrations().then(function(registrations) {
+          for(let registration of registrations) {
+            registration.unregister();
+            console.log('舊版 SW 已註銷');
+          }
+        });
+      }
+
+      // 2. 刪除所有快取檔案 (清空舊倉庫)
+      if ('caches' in window) {
+        caches.keys().then(function(names) {
+          for (let name of names) {
+            caches.delete(name);
+            console.log('舊快取已刪除:', name);
+          }
+        });
+      }
+
+      // 3. 更新標記並強制重整
+      localStorage.setItem('pwa_version', APP_VERSION);
+      
+      // 延遲 200ms 確保刪除完成後，強制重整頁面
+      setTimeout(() => {
+        alert('系統已更新至最新版 (v1.8)，將重新載入。');
+        window.location.reload(true); 
+      }, 200);
+
+    } else {
+      // === 如果版本已經是最新的，則正常註冊 SW ===
+      if ('serviceWorker' in navigator) {
+        window.addEventListener('load', () => {
+          navigator.serviceWorker.register('./sw.js')
+            .then(reg => console.log('SW 註冊成功:', reg.scope))
+            .catch(err => console.log('SW 註冊失敗:', err));
+        });
+      }
     }
   </script>
 </head>
 <body class="theme-scheduler tsaa-layout">
   <header>
     <h1>商業發票（OCR）</h1>
-    <div class="sub">v1.7M-F-W-R2 · 手機版 · 鈦灰 × 香檳金</div>
+    <div class="sub">v1.8-Fix · 手機版 · 鈦灰 × 香檳金</div>
   </header>
 
   <main>
@@ -96,7 +140,7 @@
       </div>
       <div class="row" id="tplRow" style="display:flex;gap:8px;align-items:center;">
         <input id="tplInput" type="file" accept="image/png, image/jpeg, application/pdf" />
-        <small>可上傳模板（PDF/PNG/JPG）。若留空，將嘗試載入 assets/ci_template.pdf 或 assets/ci_template.png</small>
+        <small>可上傳模板（PDF/PNG/JPG）。若留空，將嘗試載入 assets/fedex-commercial-invoice-form-tw.pdf</small>
       </div>
     </section>
   </main>
@@ -107,7 +151,7 @@
 
   <script src="https://cdn.jsdelivr.net/npm/pdf-lib@1.17.1/dist/pdf-lib.min.js"></script>
   <script src="https://unpkg.com/ocrad.js/ocrad.min.js"></script>
-  <script src="main.js?v=ner-r2"></script>
+  <script src="main.js?v=ner-final-fix"></script>
   <link rel="stylesheet" href="ui/tsaa_tokens.css" />
   <link rel="stylesheet" href="ui/scheduler.css" />
   <script src="ui/theme-loader.js"></script>
