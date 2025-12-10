@@ -1,10 +1,8 @@
-// v1.7M-F-W-R2 Mobile (ZH-TW) — Uses "v1.7M 原始制式表格" style for PDF layout
+// main.js v2.0-Clean (基於 v1.7M 邏輯，移除 OCR)
 const $ = (id) => document.getElementById(id);
 
 // UI 元件參照
-const btnCameraText = $("btnCameraText");
 const btnRunNER = $("btnRunNER");
-const photoInput = $("photoInput");
 const rawText = $("rawText");
 const textExtractStatus = $("textExtractStatus");
 
@@ -24,17 +22,13 @@ const phoneEl = $("phone");
 
 const btnPdf = $("btnPdf");
 const outStatus = $("outStatus");
-const btnRemap = $("btnRemap");
 const btnClear = $("btnClear");
-const btnEnhance = $("btnEnhance");
-const btnRotate = $("btnRotate");
 const useFedExTpl = $("useFedExTpl");
 const tplInput = $("tplInput");
 const tplRow = $("tplRow");
 
-// 舊版功能佔位符 (避免報錯)
-const fileInput=null,btnCamera=null,btnOcr=null,ocrProgress=null,ocrStatus=null,ocrText=null,preview=null;
-const btnScanStart=null,btnScanStop=null,barcodeVideo=null,barcodeStatus=null,btnSwitchCamera=null,btnDecodeImage=null,imgDecodeInput=null,btnHidToggle=null;
+// 狀態顯示工具
+function setStatus(msg){ if (textExtractStatus) textExtractStatus.innerHTML = msg || ''; }
 
 // 切換模板上傳列顯示狀態
 if (useFedExTpl && tplRow) {
@@ -45,83 +39,37 @@ if (useFedExTpl && tplRow) {
   syncTplRow();
 }
 
-// 處理相片選擇 -> 擷取文字
-if (photoInput) {
-  photoInput.addEventListener("change", async (e) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    try {
-      setStatus('讀取圖片中…');
-      const { canvas } = await loadImageToCanvas(file);
-      setStatus('擷取文字中…');
-      const txt = await extractTextFromImage(canvas);
-      rawText.value = (txt || '').trim();
-      setStatus(txt && txt.trim() ? '已擷取文字，請按「使用文字智能帶入（NER）」' : '未擷取到可用文字，請嘗試較清晰的照片');
-    } catch (err) {
-      console.error(err);
-      setStatus('擷取文字失敗：' + (err?.message || err));
-    } finally {
-      photoInput.value = '';
+// 監聽 NER 按鈕
+if (btnRunNER && rawText){
+  btnRunNER.addEventListener('click', () => {
+    const val = (rawText.value||'').trim();
+    if(!val) { 
+        alert('請先貼上文字內容！'); 
+        return; 
     }
+    
+    // 執行你原本的高級解析邏輯
+    const ent = parseTextWithNER(val);
+    fillFieldsFromEntities(ent);
+    
+    alert('✅ 智能帶入完成！請檢查欄位。');
+    setStatus('✅ 解析完成');
   });
 }
 
-function setStatus(msg){ if (textExtractStatus) textExtractStatus.textContent = msg || ''; }
-
-// Canvas 載入工具
-async function loadImageToCanvas(src){
-  return new Promise((resolve, reject) => {
-    try {
-      const img = new Image();
-      img.onload = () => {
-        const maxW = 1600;
-        const scale = Math.min(1, maxW / img.width);
-        const w = Math.round(img.width * scale);
-        const h = Math.round(img.height * scale);
-        const canvas = document.createElement('canvas');
-        canvas.width = w; canvas.height = h;
-        const ctx = canvas.getContext('2d');
-        ctx.drawImage(img, 0, 0, w, h);
-        resolve({ canvas, ctx, width:w, height:h });
-      };
-      img.onerror = () => reject(new Error('無法載入圖片'));
-      if (src instanceof File) {
-        const fr = new FileReader();
-        fr.onload = () => { img.src = fr.result; };
-        fr.readAsDataURL(src);
-      } else if (typeof src === 'string') {
-        img.src = src;
-      } else {
-        reject(new Error('不支援的圖片來源'));
-      }
-    } catch (e){ reject(e); }
+// 監聽清空按鈕
+if (btnClear){
+  btnClear.addEventListener('click', () => {
+    if(confirm('確定要清空所有欄位嗎？')) {
+        [awb, dateEl, seller, sellerAddr, buyer, buyerAddr, countryEl, postalCodeEl, phoneEl, desc, amount, weight, pieces, rawText].forEach(e => { if(e) e.value = ''; });
+        setStatus("");
+        outStatus.textContent = "";
+    }
   });
-}
-
-// 簡易 OCR
-async function extractTextFromImage(canvas){
-  try {
-    const TD = window.TextDetector;
-    if (TD) {
-      const detector = new TD();
-      const blob = await new Promise(res => canvas.toBlob(res, 'image/png', 0.92));
-      const bmp = await createImageBitmap(blob);
-      const results = await detector.detect(bmp);
-      if (Array.isArray(results) && results.length){
-        return results.map(r => r.rawValue || r.text || '').filter(Boolean).join('\n');
-      }
-    }
-  } catch(e){ }
-  try {
-    if (typeof OCRAD === 'function'){
-      return await new Promise((res) => { try { res(OCRAD(canvas)||''); } catch { res(''); } });
-    }
-  } catch {}
-  return '';
 }
 
 // ==========================================
-// 恢復完整的 NER 智能解析邏輯 (Full Version)
+// 恢復完整的 NER 智能解析邏輯 (保留你原本的程式碼)
 // ==========================================
 function parseTextWithNER(text){
   const out = {
@@ -134,15 +82,15 @@ function parseTextWithNER(text){
   const lines = text.split(/\r?\n/).map(s=>s.trim()).filter(Boolean);
   const whole = lines.join('\n');
 
-  // Phone (intl, allow spaces/dashes)
+  // Phone
   const phoneMatch = whole.match(/(?:TEL|PHONE|聯絡電話|電話)\s*[:：]?\s*([+]?\d[\d\s\-()]{6,}\d)/i) || whole.match(/\b\+?\d[\d\s\-()]{6,}\d\b/);
   if (phoneMatch) out.phone = phoneMatch[1] ? phoneMatch[1].trim() : phoneMatch[0].trim();
 
-  // Postal code (3–6 digits; TW often 3 or 5, US 5, etc.)
+  // Postal code
   const postalMatch = whole.match(/(?:POSTAL\s*CODE|ZIP|郵遞區號)\s*[:：]?\s*(\d{3,6})\b/i) || whole.match(/\b(\d{3,6})\b(?!.*\b(\d{3,6})\b)/);
   if (postalMatch) out.postalCode = postalMatch[1] || postalMatch[0];
 
-  // Country detection (simple dictionary + ISO)
+  // Country detection
   const countryList = [
     'Taiwan','Republic of China','ROC','Taipei','Taiwan, Province of China','United States','USA','US','America','United Kingdom','UK','GB','Great Britain','China','PRC','Japan','JP','Korea','KR','South Korea','Republic of Korea','Canada','CA','Australia','AU','Germany','DE','France','FR','Italy','IT','Spain','ES','Netherlands','NL','Singapore','SG','Hong Kong','HK','Macao','Macau','MO'
   ];
@@ -155,7 +103,19 @@ function parseTextWithNER(text){
     if (iso) out.country = iso[1];
   }
 
-  // Identify sender/recipient blocks by cues (EN/ZH)
+  // AWB 偵測 (新增)
+  const awbMatch = whole.match(/(?:\b|\D)(\d{4}[ \-]?\d{4}[ \-]?\d{4})(?:\b|\D)/);
+  if (awbMatch) awb.value = awbMatch[1].replace(/[ \-]/g, '');
+
+  // 日期偵測 (新增)
+  const dateMatch = whole.match(/(\d{4}[\/\-]\d{1,2}[\/\-]\d{1,2})|(\d{1,2}\s+(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\.?\s+\d{4})/i);
+  if (dateMatch) dateEl.value = dateMatch[0];
+
+  // 金額偵測 (新增)
+  const amountMatch = whole.match(/(?:USD|Value|Total|Amount)[:\s\$]*(\d{1,5}\.?\d{0,2})/i);
+  if (amountMatch) amount.value = amountMatch[1];
+
+  // Identify sender/recipient blocks
   const idxSender = lines.findIndex(l=>/(寄件人|發件人|Sender|From|Shipper|Consignor)/i.test(l));
   const idxRecipient = lines.findIndex(l=>/(收件人|收貨人|Recipient|To|Ship\s*-?\s*To|Consignee)/i.test(l));
 
@@ -173,12 +133,10 @@ function parseTextWithNER(text){
   const senderBlock = sliceBlock(idxSender);
   const recipientBlock = sliceBlock(idxRecipient);
 
-  // Heuristics: first line likely name/company; subsequent lines address
   const parseNameAddr = (block) => {
     if (!block || !block.length) return { name:'', company:'', address:'' };
     const first = block[0];
     const second = block[1] || '';
-    // If first line contains Co., Ltd., Inc., 公司, 股份, 有限, treat as company
     const isCompany = /(CO\.?|INC\.?|LTD\.?|LLC|有限公司|股份|公司|集團|CORP\.?)/i.test(first);
     const name = isCompany ? second : first;
     const company = isCompany ? first : '';
@@ -192,7 +150,7 @@ function parseTextWithNER(text){
   out.senderName = sNA.name; out.senderCompany = sNA.company; out.senderAddress = sNA.address;
   out.recipientName = rNA.name; out.recipientCompany = rNA.company; out.recipientAddress = rNA.address;
 
-  // If still missing, try generic address/name heuristics
+  // Fallback address logic
   if (!out.recipientAddress){
     const cityZipLine = lines.find(l => /(CITY|TOWNSHIP|COUNTY|DISTRICT|VILLAGE|TOWN|CITY\s*\d{2}|[A-Z]{2,})\s+\d{3,6}(?:\s+[A-Z]{2})?$/i.test(l));
     if (cityZipLine){
@@ -206,26 +164,23 @@ function parseTextWithNER(text){
     }
   }
 
-  // Semantic item description extraction (goods/commodity)
+  // Semantic Description Extraction (你原本的邏輯)
   try {
     const descEnt = extractShipmentDescriptionSemantic({
       text: whole,
       lines,
-      excludeBlocks: {
-        sender: senderBlock,
-        recipient: recipientBlock
-      }
+      excludeBlocks: { sender: senderBlock, recipient: recipientBlock }
     });
     if (descEnt && descEnt.value && descEnt.confidence >= 3) {
       out.description = descEnt.value;
       out.descriptionConfidence = descEnt.confidence;
     }
-  } catch(e){ /* best-effort; ignore */ }
+  } catch(e){ }
 
   return out;
 }
 
-// --- Semantic shipment description extractor (Full Logic Restored) ---
+// --- Semantic shipment description extractor (保持不變) ---
 function extractShipmentDescriptionSemantic(ctx){
   const text = (ctx?.text || '').trim();
   const lines = Array.isArray(ctx?.lines) ? ctx.lines : text.split(/\r?\n/).map(s=>s.trim());
@@ -326,25 +281,8 @@ function fillFieldsFromEntities(ent){
   }
 }
 
-if (btnRunNER && rawText){
-  btnRunNER.addEventListener('click', () => {
-    const val = (rawText.value||'').trim();
-    if(!val) { setStatus('請先拍照'); return; }
-    const ent = parseTextWithNER(val);
-    fillFieldsFromEntities(ent);
-    setStatus('已完成智能帶入。');
-  });
-}
-
-if (btnClear){
-  btnClear.addEventListener('click', () => {
-    [awb, dateEl, seller, sellerAddr, buyer, buyerAddr, countryEl, postalCodeEl, phoneEl, desc, amount, weight, pieces, rawText].forEach(e => { if(e) e.value = ''; });
-    setStatus("");
-  });
-}
-
 // =========================================================
-// PDF 生成邏輯 (含紅框除錯 + 中文警告)
+// PDF 生成邏輯 (完全保留)
 // =========================================================
 btnPdf.addEventListener("click", async () => {
   const data = {
@@ -361,7 +299,7 @@ btnPdf.addEventListener("click", async () => {
   };
 
   outStatus.textContent = "準備生成 PDF...";
-  outStatus.style.color = "blue";
+  outStatus.style.color = "#C8B47E";
 
   const allText = Object.values(data).join('');
   const hasChinese = /[\u4e00-\u9fa5]/.test(allText);
@@ -376,7 +314,7 @@ btnPdf.addEventListener("click", async () => {
     const wantTpl = useFedExTpl && useFedExTpl.checked;
     const helv = await pdf.embedFont(StandardFonts.Helvetica);
     const size = 10;
-    const DEBUG_BOX = true; 
+    const DEBUG_BOX = false; // 預設關閉紅框，如果你想除錯可以改成 true
 
     if (wantTpl) {
       let tplBytes = null;
@@ -445,36 +383,22 @@ btnPdf.addEventListener("click", async () => {
         if (line) drawField(line, x, currentY);
     };
 
-    // 1. AWB (上方標題右側/中間框)
+    // 填寫座標 (保持不變)
     drawField(data.awb, 280, 785); 
-
-    // 2. 出口日期 (AWB 下方)
     drawField(data.date, 150, 762);
-
-    // 3. 寄件人區塊 (左側)
     drawField(data.seller, 40, 725);
     wrapText(data.sellerAddr, 40, 710, 250);
-
-    // 4. 收件人區塊 (右側)
     drawField(data.buyer, 310, 725);
     wrapText(data.buyerAddr, 310, 710, 250);
-
-    // 5. 貨品描述 (中間寬欄)
     drawField(data.desc, 190, 520);
-
-    // 6. 表格數據
-    drawField(data.pieces, 120, 520); // 件數
-    drawField(data.pieces, 420, 520); // 數量
-    drawField(data.weight, 455, 520); // 重量
-    drawField(data.amount, 500, 520); // 單價
-    drawField(data.amount, 550, 520); // 總價
-
-    // 7. 底部總計區
+    drawField(data.pieces, 120, 520); 
+    drawField(data.pieces, 420, 520); 
+    drawField(data.weight, 455, 520); 
+    drawField(data.amount, 500, 520); 
+    drawField(data.amount, 550, 520); 
     drawField(data.pieces, 120, 150);
     drawField(data.weight, 455, 150);
     drawField(data.amount, 550, 150);
-
-    // 8. 簽名欄上方
     drawField(data.seller, 40, 60);
     drawField(data.date, 300, 60);
 
@@ -485,7 +409,7 @@ btnPdf.addEventListener("click", async () => {
     link.download = `FedEx_Invoice_TW_${Date.now()}.pdf`;
     link.click();
     
-    outStatus.textContent = "PDF 下載成功！(含紅框除錯)";
+    outStatus.textContent = "PDF 下載成功！";
     setTimeout(() => outStatus.textContent = "", 5000);
 
   } catch (e) {

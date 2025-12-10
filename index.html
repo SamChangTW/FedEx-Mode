@@ -3,54 +3,38 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>FedEx 模式｜OCR 商業發票 v1.8-Fix</title>
+  <title>FedEx 模式｜智能發票解析 v2.0</title>
   <link rel="manifest" href="manifest.json">
   <link rel="stylesheet" href="style.css" />
   
-  <script>
-    // 設定當前版本號 (每次發布新版時，改這個字串就能強制用戶更新)
-    const APP_VERSION = 'v1.8-ner-final-fix';
+  <link rel="stylesheet" href="ui/tsaa_tokens.css" />
+  <link rel="stylesheet" href="ui/scheduler.css" />
 
-    // 檢查用戶手機裡的標記是否為最新
+  <script>
+    // 設定當前版本號 (更新此字串以強制 PWA 更新)
+    const APP_VERSION = 'v2.0-ner-clean';
+
     if (localStorage.getItem('pwa_version') !== APP_VERSION) {
-      console.log('偵測到舊版本，開始強制清理...');
-      
-      // 1. 註銷所有 Service Worker (殺死舊守門員)
+      console.log('偵測到新版本，執行清理...');
       if ('serviceWorker' in navigator) {
         navigator.serviceWorker.getRegistrations().then(function(registrations) {
-          for(let registration of registrations) {
-            registration.unregister();
-            console.log('舊版 SW 已註銷');
-          }
+          for(let registration of registrations) registration.unregister();
         });
       }
-
-      // 2. 刪除所有快取檔案 (清空舊倉庫)
       if ('caches' in window) {
         caches.keys().then(function(names) {
-          for (let name of names) {
-            caches.delete(name);
-            console.log('舊快取已刪除:', name);
-          }
+          for (let name of names) caches.delete(name);
         });
       }
-
-      // 3. 更新標記並強制重整
       localStorage.setItem('pwa_version', APP_VERSION);
-      
-      // 延遲 200ms 確保刪除完成後，強制重整頁面
       setTimeout(() => {
-        alert('系統已更新至最新版 (v1.8)，將重新載入。');
+        alert('系統已升級至 v2.0 (純文字解析版)，將重新載入。');
         window.location.reload(true); 
       }, 200);
-
     } else {
-      // === 如果版本已經是最新的，則正常註冊 SW ===
       if ('serviceWorker' in navigator) {
         window.addEventListener('load', () => {
-          navigator.serviceWorker.register('./sw.js')
-            .then(reg => console.log('SW 註冊成功:', reg.scope))
-            .catch(err => console.log('SW 註冊失敗:', err));
+          navigator.serviceWorker.register('./sw.js').catch(err => console.log('SW 失敗:', err));
         });
       }
     }
@@ -58,25 +42,33 @@
 </head>
 <body class="theme-scheduler tsaa-layout">
   <header>
-    <h1>商業發票（OCR）</h1>
-    <div class="sub">v1.8-Fix · 手機版 · 鈦灰 × 香檳金</div>
+    <h1>商業發票助手</h1>
+    <div class="sub">v2.0 · 智能文字解析 · 複製貼上版</div>
   </header>
 
   <main>
     <section class="tsaa-card">
-      <h2>1) 取像與文字</h2>
-      <div class="row" style="gap:8px; align-items:center; flex-wrap:wrap;">
-        <label id="btnCameraText" for="photoInput" role="button" class="tsaa-btn">
-          啟動相機（拍照取文字）
-        </label>
-        <button id="btnRunNER" type="button" class="tsaa-btn">使用文字智能帶入（NER）</button>
-        <small id="textExtractStatus" style="opacity:.8"></small>
+      <h2>1) 文字輸入</h2>
+      
+      <div class="row" style="margin-bottom: 8px;">
+        <small id="textExtractStatus" style="display:block; color:#ccc; line-height:1.5;">
+          <b>操作方式：</b>請從手機相簿或 Email <b>「複製」</b>發票文字，貼入下方空格，再按下按鈕。
+        </small>
       </div>
-      <input id="photoInput" type="file" accept="image/*" capture="environment" style="position:absolute;left:-9999px;width:1px;height:1px;opacity:0;" />
-      <textarea id="rawText" rows="5" placeholder="將從相片擷取的文字會顯示在此，或可直接貼上（標籤、AWB、發票或螢幕截圖文字）"></textarea>
-      <small style="display:block;opacity:.7;margin-top:4px;line-height:1.4;">
-        說明：本流程改為「拍照 → 取文字 → NER 智能解析」。若裝置支援 TextDetector 將離線識別，否則使用輕量 OCR 後再解析。
-      </small>
+
+      <textarea id="rawText" rows="6" 
+        placeholder="長按此處貼上發票內容...
+範例：
+FedEx AWB: 7721 6500 0095
+Date: 2023-10-25
+Total: 120.00 USD
+..."></textarea>
+      
+      <div class="row" style="margin-top:10px;">
+        <button id="btnRunNER" type="button" class="tsaa-btn" style="width:100%; font-weight:bold;">
+          ⚡ 執行智能帶入 (NER)
+        </button>
+      </div>
     </section>
 
     <section class="tsaa-card">
@@ -92,19 +84,19 @@
           <input id="seller" placeholder="公司名稱或姓名" />
         </label>
         <label class="full">寄件人地址（Sender Address）
-          <textarea id="sellerAddr" placeholder="街道與門牌號、城市、州/省、郵遞區號、國家" rows="2"></textarea>
+          <textarea id="sellerAddr" placeholder="街道、城市、國家..." rows="2"></textarea>
         </label>
         <label class="full">收件人（Recipient）
           <input id="buyer" placeholder="公司名稱或姓名" />
         </label>
         <label class="full">收件人地址（Recipient Address）
-          <textarea id="buyerAddr" placeholder="街道與門牌號、城市、州/省、郵遞區號、國家" rows="2"></textarea>
+          <textarea id="buyerAddr" placeholder="街道、城市、國家..." rows="2"></textarea>
         </label>
         <label>國家（Country）
-          <input id="country" placeholder="例如：Taiwan / 美國 / JP / TW" />
+          <input id="country" placeholder="例如：Taiwan / USA" />
         </label>
         <label>郵遞區號（Postal Code）
-          <input id="postalCode" placeholder="例如：100、90210、10110" />
+          <input id="postalCode" placeholder="例如：100" />
         </label>
         <label>電話（Phone）
           <input id="phone" placeholder="例如：+886 912345678" />
@@ -113,47 +105,48 @@
           <input id="desc" placeholder="例如：Paperboard Box" />
         </label>
         <label>金額（Amount / USD）
-          <input id="amount" type="number" step="0.01" placeholder="數字，例如：120.00" />
+          <input id="amount" type="number" step="0.01" placeholder="例如：120.00" />
         </label>
         <label>重量（Weight）
-          <input id="weight" placeholder="例如：0.50 KG 或 1 LB" />
+          <input id="weight" placeholder="例如：0.50 KG" />
         </label>
         <label>件數（Pieces）
           <input id="pieces" inputmode="numeric" placeholder="例如：1" />
         </label>
       </div>
       <div class="row">
-        <button id="btnClear" type="button" class="tsaa-btn">清空欄位</button>
+        <button id="btnClear" type="button" class="tsaa-btn" style="background:#ef4444; border-color:#ef4444; color:white;">清空所有欄位</button>
       </div>
     </section>
 
     <section class="tsaa-card">
-      <h2>3) 輸出</h2>
-      <div class="row">
-        <button id="btnPdf" type="button" class="tsaa-btn">生成 PDF（制式表格）</button>
-        <span id="outStatus"></span>
-      </div>
-      <div class="row">
+      <h2>3) 輸出 PDF</h2>
+      <div class="row" style="margin-bottom:10px;">
         <label style="display:flex;align-items:center;gap:8px;">
-          <input id="useFedExTpl" type="checkbox" checked /> 使用 FedEx 官方版型（背景疊字）
+          <input id="useFedExTpl" type="checkbox" checked /> 
+          使用 FedEx 風格背景
         </label>
       </div>
-      <div class="row" id="tplRow" style="display:flex;gap:8px;align-items:center;">
+      
+      <div class="row" id="tplRow" style="display:flex; gap:8px; align-items:center; margin-bottom:15px; padding:8px; border-radius:4px; background:rgba(255,255,255,0.05);">
         <input id="tplInput" type="file" accept="image/png, image/jpeg, application/pdf" />
-        <small>可上傳模板（PDF/PNG/JPG）。若留空，將嘗試載入 assets/fedex-commercial-invoice-form-tw.pdf</small>
+        <small style="font-size:0.75rem; opacity:0.7;">(選用) 上傳底圖</small>
+      </div>
+
+      <div class="row">
+        <button id="btnPdf" type="button" class="tsaa-btn">📄 生成 PDF 並下載</button>
+        <span id="outStatus" style="margin-left:8px; font-weight:bold; color:var(--tsaa-color-accent);"></span>
       </div>
     </section>
   </main>
 
   <footer>
-    <small>Public template · 無簽名 · 無 Logo · 僅必要欄位 · 可離線使用（PWA）</small>
+    <small>Invoice Helper v2.0 · 移除 OCR 模組 · 僅需貼上文字</small>
   </footer>
 
   <script src="https://cdn.jsdelivr.net/npm/pdf-lib@1.17.1/dist/pdf-lib.min.js"></script>
-  <script src="https://unpkg.com/ocrad.js/ocrad.min.js"></script>
-  <script src="main.js?v=ner-final-fix"></script>
-  <link rel="stylesheet" href="ui/tsaa_tokens.css" />
-  <link rel="stylesheet" href="ui/scheduler.css" />
+  
+  <script src="main.js?v=2.0-clean"></script>
   <script src="ui/theme-loader.js"></script>
 </body>
 </html>
