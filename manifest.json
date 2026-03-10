@@ -1,9 +1,18 @@
 {
   "name": "FedEx 模式 OCR 商業發票",
   "short_name": "FedEx OCR Invoice",
+  "description": "拍照 OCR 智能帶入欄位，一鍵生成 FedEx 商業發票 PDF",
   "start_url": ".",
   "display": "standalone",
-  "background_color": "#ffffff",
-  "theme_color": "#11141a",
-  "icons": []
+  "orientation": "portrait",
+  "background_color": "#1E2A44",
+  "theme_color": "#C8B47E",
+  "icons": [
+    {
+      "src": "assets/FedEx icon.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
 }

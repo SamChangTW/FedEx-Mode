@@ -1,14 +1,17 @@
 // 1. 修改版本號 (這是讓手機知道要更新的關鍵)
-const CACHE_NAME = 'fedex-ocr-v1.8-force-update';
+const CACHE_NAME = 'fedex-ocr-v1.8-final-fix';
 
 // 2. 更新快取清單 (加入新版 main.js 和 PDF)
 const ASSETS = [
   './',
   './index.html',
   './style.css',
-  './main.js?v=ner-r2', // 重要：這裡要跟 index.html 的引用一致
+  './main.js?v=ner-final-fix', // 重要：這裡要跟 index.html 的引用一致
   './manifest.json',
-  './assets/fedex-commercial-invoice-form-tw.pdf', // 新的模板檔案
+  './assets/fedex-commercial-invoice-form-tw.pdf', // 模板檔案
+  './assets/FedEx icon.png',                        // PWA 圖示
+  './ui/tsaa_tokens.css',
+  './ui/theme-loader.js',
   'https://cdn.jsdelivr.net/npm/pdf-lib@1.17.1/dist/pdf-lib.min.js', // 外部套件也快取
   'https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js'
 ];
@@ -17,7 +20,7 @@ const ASSETS = [
 self.addEventListener('install', event => {
   // 強制跳過等待，立即啟用新版 SW
   self.skipWaiting();
-  
+
   event.waitUntil(
     caches.open(CACHE_NAME)
       .then(cache => {
