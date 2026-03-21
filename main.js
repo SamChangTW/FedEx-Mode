@@ -519,7 +519,7 @@ btnPdf.addEventListener("click", async () => {
     const wantTpl = useFedExTpl && useFedExTpl.checked;
     const helv = await pdf.embedFont(StandardFonts.Helvetica);
     const size = 10;
-    const DEBUG_BOX = false; // 正式版關閉紅框除錯
+    const DEBUG_BOX = true; // 🔍 座標確認模式（確認後改回 false）
 
     if (wantTpl) {
       let tplBytes = null;
@@ -563,6 +563,10 @@ btnPdf.addEventListener("click", async () => {
 
     if (!page) page = pdf.addPage([595.28, 841.89]);
 
+    // 自動讀取頁面實際尺寸（適配任意 PDF）
+    const { width: pgW, height: pgH } = page.getSize();
+    console.log(`[PDF] 頁面尺寸: ${pgW.toFixed(1)} × ${pgH.toFixed(1)} pt`);
+
     const drawField = (text, x, y) => {
       if (!text) return;
       const safeText = String(text).replace(/[\u4e00-\u9fa5]/g, '??');
@@ -592,43 +596,47 @@ btnPdf.addEventListener("click", async () => {
       if (line.trim()) drawField(line.trim(), x, currentY);
     };
 
-    // ===== 精確校準座標（PDF 尺寸 843×1193pt，已由校準工具實測）=====
+    // ===== 動態比例座標（依據 Invoice 參考圖實際版型比例）=====
+    // 所有座標是 pgW/pgH 的百分比，自動適配任意頁面尺寸
 
-    // #1 AWB 編號 — INTERNATIONAL AIR WAYBILL NO. 輸入框
-    drawField(data.awb, 103, 1046);
+    // #1 AWB 編號 — 標題列右側輸入框（從左 35%，從上 8%）
+    drawField(data.awb, pgW * 0.35, pgH * 0.926);
 
-    // #2 出口日期 — DATE OF EXPORTATION 右側
-    drawField(data.date, 103, 1009);
+    // #2 出口日期 — DATE OF EXPORTATION 左側填寫區（從左 5%，從上 14%）
+    drawField(data.date, pgW * 0.05, pgH * 0.870);
 
-    // #3 寄件人 — SHIPPER/EXPORTER 左側區塊
-    drawField(data.seller, 13, 959);
-    wrapText(data.sellerAddr, 13, 940, 220);
+    // #3 寄件人 — SHIPPER/EXPORTER 左側大方塊（從左 2%，從上 22%）
+    drawField(data.seller,    pgW * 0.02, pgH * 0.800);
+    wrapText(data.sellerAddr, pgW * 0.02, pgH * 0.784, pgW * 0.44);
 
-    // #4 收件人 — CONSIGNEE 右側區塊
-    drawField(data.buyer, 433, 959);
-    wrapText(data.buyerAddr, 433, 940, 220);
+    // #4 收件人 — CONSIGNEE 右側大方塊（從左 52%，從上 22%）
+    drawField(data.buyer,    pgW * 0.52, pgH * 0.800);
+    wrapText(data.buyerAddr, pgW * 0.52, pgH * 0.784, pgW * 0.44);
 
-    // #5 件數 — NO. OF PKGS 欄第一列
-    drawField(data.pieces, 60, 559);
+    // 表格第一資料列（從上約 53%）
+    // #5 件數 — NO. OF PKGS 欄（從左 12%）
+    drawField(data.pieces, pgW * 0.12, pgH * 0.472);
 
-    // #6 貨品描述 — FULL DESCRIPTION OF GOODS 欄第一列
-    drawField(data.desc, 140, 559);
+    // #6 貨品描述 — FULL DESCRIPTION OF GOODS 欄（從左 25%）
+    drawField(data.desc,   pgW * 0.25, pgH * 0.472);
 
-    // #7 重量 — WEIGHT 欄第一列
-    drawField(data.weight, 380, 559);
+    // #7 重量 — WEIGHT 欄（從左 57%）
+    drawField(data.weight, pgW * 0.57, pgH * 0.472);
 
-    // #8 單價 / 總價 — UNIT VALUE / TOTAL VALUE 欄第一列
-    drawField(data.amount, 447, 559); // 單價
-    drawField(data.amount, 513, 559); // 總價
+    // #8 單價 — UNIT VALUE 欄（從左 72%）
+    drawField(data.amount, pgW * 0.72, pgH * 0.472);
 
-    // 底部合計區 — TOTAL PKGS / TOTAL WEIGHT / TOTAL INVOICE VALUE
-    drawField(data.pieces, 57,  199);
-    drawField(data.weight, 380, 199);
-    drawField(data.amount, 513, 199);
+    // #8 總價 — TOTAL VALUE 欄（從左 84%）
+    drawField(data.amount, pgW * 0.84, pgH * 0.472);
 
-    // 簽名欄 — 寄件人姓名 / 日期
-    drawField(data.seller, 13,  26);
-    drawField(data.date,   500, 26);
+    // 底部合計列（從上約 83%）
+    drawField(data.pieces, pgW * 0.12, pgH * 0.170);
+    drawField(data.weight, pgW * 0.57, pgH * 0.170);
+    drawField(data.amount, pgW * 0.84, pgH * 0.170);
+
+    // 簽名欄（從上約 94%）
+    drawField(data.seller, pgW * 0.02, pgH * 0.060);
+    drawField(data.date,   pgW * 0.52, pgH * 0.060);
 
     const pdfBytes = await pdf.save();
     const blob = new Blob([pdfBytes], { type: "application/pdf" });
@@ -637,7 +645,7 @@ btnPdf.addEventListener("click", async () => {
     link.download = `FedEx_Invoice_TW_${Date.now()}.pdf`;
     link.click();
 
-    outStatus.textContent = "PDF 下載成功！(含紅框除錯)";
+    outStatus.textContent = `PDF 下載成功！(頁面: ${pgW.toFixed(0)}×${pgH.toFixed(0)}pt)`;
     setTimeout(() => outStatus.textContent = "", 5000);
 
   } catch (e) {
