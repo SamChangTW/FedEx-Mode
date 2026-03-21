@@ -519,7 +519,7 @@ btnPdf.addEventListener("click", async () => {
     const wantTpl = useFedExTpl && useFedExTpl.checked;
     const helv = await pdf.embedFont(StandardFonts.Helvetica);
     const size = 10;
-    const DEBUG_BOX = true; // 🔍 座標確認模式（確認後改回 false）
+    const DEBUG_BOX = false; // 正式版關閉紅框除錯
 
     if (wantTpl) {
       let tplBytes = null;
@@ -596,47 +596,47 @@ btnPdf.addEventListener("click", async () => {
       if (line.trim()) drawField(line.trim(), x, currentY);
     };
 
-    // ===== 動態比例座標（依據 Invoice 參考圖實際版型比例）=====
-    // 所有座標是 pgW/pgH 的百分比，自動適配任意頁面尺寸
+    // ===== 動態比例座標（依據實際 PDF 視覺截圖完美校準版）=====
+    // 所有坐標 Y 軸從下方起算，比例已精確對齊各個欄位框內
 
-    // #1 AWB 編號 — 標題列右側輸入框（從左 35%，從上 8%）
-    drawField(data.awb, pgW * 0.35, pgH * 0.926);
+    // #1 AWB 編號 — INTERNATIONAL AIR WAYBILL NO. 右格
+    drawField(data.awb, pgW * 0.16, pgH * 0.911);
 
-    // #2 出口日期 — DATE OF EXPORTATION 左側填寫區（從左 5%，從上 14%）
-    drawField(data.date, pgW * 0.05, pgH * 0.870);
+    // #2 出口日期 — DATE OF EXPORTATION 格子內
+    drawField(data.date, pgW * 0.05, pgH * 0.866);
 
-    // #3 寄件人 — SHIPPER/EXPORTER 左側大方塊（從左 2%，從上 22%）
-    drawField(data.seller,    pgW * 0.02, pgH * 0.800);
-    wrapText(data.sellerAddr, pgW * 0.02, pgH * 0.784, pgW * 0.44);
+    // #3 寄件人 — SHIPPER/EXPORTER 框內 (Y=0.797)
+    drawField(data.seller,    pgW * 0.02, pgH * 0.797);
+    wrapText(data.sellerAddr, pgW * 0.02, pgH * 0.777, pgW * 0.44);
 
-    // #4 收件人 — CONSIGNEE 右側大方塊（從左 52%，從上 22%）
-    drawField(data.buyer,    pgW * 0.52, pgH * 0.800);
-    wrapText(data.buyerAddr, pgW * 0.52, pgH * 0.784, pgW * 0.44);
+    // #4 收件人 — CONSIGNEE 框內 (Y=0.797)
+    drawField(data.buyer,    pgW * 0.52, pgH * 0.797);
+    wrapText(data.buyerAddr, pgW * 0.52, pgH * 0.777, pgW * 0.44);
 
-    // 表格第一資料列（從上約 53%）
-    // #5 件數 — NO. OF PKGS 欄（從左 12%）
-    drawField(data.pieces, pgW * 0.12, pgH * 0.472);
+    // ===== 明細表格 (第一資料列: Y=0.654，對齊欄首下方) =====
+    // #5 件數 — NO. OF PKGS 欄
+    drawField(data.pieces, pgW * 0.13, pgH * 0.654);
 
-    // #6 貨品描述 — FULL DESCRIPTION OF GOODS 欄（從左 25%）
-    drawField(data.desc,   pgW * 0.25, pgH * 0.472);
+    // #6 貨品描述 — FULL DESCRIPTION OF GOODS 欄
+    drawField(data.desc,   pgW * 0.22, pgH * 0.654);
 
-    // #7 重量 — WEIGHT 欄（從左 57%）
-    drawField(data.weight, pgW * 0.57, pgH * 0.472);
+    // #7 重量 — WEIGHT 欄
+    drawField(data.weight, pgW * 0.57, pgH * 0.654);
 
-    // #8 單價 — UNIT VALUE 欄（從左 72%）
-    drawField(data.amount, pgW * 0.72, pgH * 0.472);
+    // #8 單價 — UNIT VALUE 欄
+    drawField(data.amount, pgW * 0.72, pgH * 0.654);
 
-    // #8 總價 — TOTAL VALUE 欄（從左 84%）
-    drawField(data.amount, pgW * 0.84, pgH * 0.472);
+    // #8 總價 — TOTAL VALUE 欄
+    drawField(data.amount, pgW * 0.84, pgH * 0.654);
 
-    // 底部合計列（從上約 83%）
-    drawField(data.pieces, pgW * 0.12, pgH * 0.170);
-    drawField(data.weight, pgW * 0.57, pgH * 0.170);
-    drawField(data.amount, pgW * 0.84, pgH * 0.170);
+    // ===== 底部合計區 (Y=0.250，對齊總計格子) =====
+    drawField(data.pieces, pgW * 0.13, pgH * 0.250);
+    drawField(data.weight, pgW * 0.57, pgH * 0.250);
+    drawField(data.amount, pgW * 0.84, pgH * 0.250);
 
-    // 簽名欄（從上約 94%）
-    drawField(data.seller, pgW * 0.02, pgH * 0.060);
-    drawField(data.date,   pgW * 0.52, pgH * 0.060);
+    // ===== 簽名欄區段 (Y=0.125，放置於底線上方) =====
+    drawField(data.seller, pgW * 0.02, pgH * 0.125);
+    drawField(data.date,   pgW * 0.50, pgH * 0.125);
 
     const pdfBytes = await pdf.save();
     const blob = new Blob([pdfBytes], { type: "application/pdf" });
