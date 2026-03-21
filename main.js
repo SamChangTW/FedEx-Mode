@@ -592,38 +592,43 @@ btnPdf.addEventListener("click", async () => {
       if (line.trim()) drawField(line.trim(), x, currentY);
     };
 
-    // 1. AWB (上方標題右側/中間框)
-    drawField(data.awb, 280, 785);
+    // ===== 精確校準座標（PDF 尺寸 843×1193pt，已由校準工具實測）=====
 
-    // 2. 出口日期 (AWB 下方)
-    drawField(data.date, 150, 762);
+    // #1 AWB 編號 — INTERNATIONAL AIR WAYBILL NO. 輸入框
+    drawField(data.awb, 103, 1046);
 
-    // 3. 寄件人區塊 (左側)
-    drawField(data.seller, 40, 725);
-    wrapText(data.sellerAddr, 40, 710, 250);
+    // #2 出口日期 — DATE OF EXPORTATION 右側
+    drawField(data.date, 103, 1009);
 
-    // 4. 收件人區塊 (右側)
-    drawField(data.buyer, 310, 725);
-    wrapText(data.buyerAddr, 310, 710, 250);
+    // #3 寄件人 — SHIPPER/EXPORTER 左側區塊
+    drawField(data.seller, 13, 959);
+    wrapText(data.sellerAddr, 13, 940, 220);
 
-    // 5. 貨品描述 (中間寬欄)
-    drawField(data.desc, 190, 520);
+    // #4 收件人 — CONSIGNEE 右側區塊
+    drawField(data.buyer, 433, 959);
+    wrapText(data.buyerAddr, 433, 940, 220);
 
-    // 6. 表格數據
-    drawField(data.pieces, 120, 520); // 件數
-    drawField(data.pieces, 420, 520); // 數量
-    drawField(data.weight, 455, 520); // 重量
-    drawField(data.amount, 500, 520); // 單價
-    drawField(data.amount, 550, 520); // 總價
+    // #5 件數 — NO. OF PKGS 欄第一列
+    drawField(data.pieces, 60, 559);
 
-    // 7. 底部總計區
-    drawField(data.pieces, 120, 150);
-    drawField(data.weight, 455, 150);
-    drawField(data.amount, 550, 150);
+    // #6 貨品描述 — FULL DESCRIPTION OF GOODS 欄第一列
+    drawField(data.desc, 140, 559);
 
-    // 8. 簽名欄上方
-    drawField(data.seller, 40, 60);
-    drawField(data.date, 300, 60);
+    // #7 重量 — WEIGHT 欄第一列
+    drawField(data.weight, 380, 559);
+
+    // #8 單價 / 總價 — UNIT VALUE / TOTAL VALUE 欄第一列
+    drawField(data.amount, 447, 559); // 單價
+    drawField(data.amount, 513, 559); // 總價
+
+    // 底部合計區 — TOTAL PKGS / TOTAL WEIGHT / TOTAL INVOICE VALUE
+    drawField(data.pieces, 57,  199);
+    drawField(data.weight, 380, 199);
+    drawField(data.amount, 513, 199);
+
+    // 簽名欄 — 寄件人姓名 / 日期
+    drawField(data.seller, 13,  26);
+    drawField(data.date,   500, 26);
 
     const pdfBytes = await pdf.save();
     const blob = new Blob([pdfBytes], { type: "application/pdf" });
