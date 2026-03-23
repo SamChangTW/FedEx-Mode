@@ -127,8 +127,19 @@ async function analyzeWithGeminiVision(imageDataUrl) {
   "country": "\u76ee\u7684\u5730\u570b\u5bb6\u540d\u7a31"
 }`;
 
-  const resp = await fetch(
-    `https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash:generateContent?key=${apiKey}`,
+  // 依序嘗試多個模型，直到成功為止
+  const MODELS_TO_TRY = [
+    'v1beta/models/gemini-2.0-flash:generateContent',
+    'v1beta/models/gemini-1.5-flash:generateContent',
+    'v1beta/models/gemini-1.5-pro:generateContent',
+    'v1beta/models/gemini-pro-vision:generateContent',
+  ];
+
+  let resp = null;
+  let lastErr = '';
+  for (const modelPath of MODELS_TO_TRY) {
+    const url = `https://generativelanguage.googleapis.com/${modelPath}?key=${apiKey}`;
+    resp = await fetch(url,
     {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -144,9 +155,13 @@ async function analyzeWithGeminiVision(imageDataUrl) {
     }
   );
 
-  if (!resp.ok) {
-    const errBody = await resp.text();
-    throw new Error(`Gemini API \u932f\u8aa4 ${resp.status}: ${errBody}`);
+    if (resp.ok) break; // 成功，跳出迴圈
+    lastErr = `${resp.status}`;
+    if (resp.status !== 404) break; // 非 404 錯誤不繼續嘗試
+  }
+  if (!resp || !resp.ok) {
+    const errBody = resp ? await resp.text() : 'No response';
+    throw new Error(`Gemini API \u932f\u8aa4 ${lastErr}: ${errBody}`);
   }
 
   const json = await resp.json();
