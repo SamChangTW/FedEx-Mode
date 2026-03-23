@@ -49,21 +49,162 @@ if (useFedExTpl && tplRow) {
   syncTplRow();
 }
 
-// 處理相片選擇 -> 擷取文字
+// ===== Gemini API Key \u8a2d\u5b9a UI \u908f\u8f2f =====
+const GEMINI_KEY_STORAGE = 'fedex_gemini_api_key';
+const geminiModeLabel      = $('geminiModeLabel');
+const geminiSettingsPanel  = $('geminiSettingsPanel');
+const geminiApiKeyInput    = $('geminiApiKeyInput');
+const btnToggleGeminiSettings = $('btnToggleGeminiSettings');
+const btnSaveGeminiKey     = $('btnSaveGeminiKey');
+const btnClearGeminiKey    = $('btnClearGeminiKey');
+
+function getGeminiKey() { return localStorage.getItem(GEMINI_KEY_STORAGE) || ''; }
+
+function updateGeminiModeLabel() {
+  if (!geminiModeLabel) return;
+  const key = getGeminiKey();
+  if (key) {
+    geminiModeLabel.textContent = '\u2728 Gemini Vision \u6a21\u5f0f';
+    geminiModeLabel.style.color = '#C8B47E';
+  } else {
+    geminiModeLabel.textContent = '\ud83d\udcf7 \u672c\u5730 OCR \u6a21\u5f0f';
+    geminiModeLabel.style.color = '#aaa';
+  }
+}
+
+if (btnToggleGeminiSettings) {
+  btnToggleGeminiSettings.addEventListener('click', () => {
+    if (!geminiSettingsPanel) return;
+    const open = geminiSettingsPanel.style.display !== 'none';
+    geminiSettingsPanel.style.display = open ? 'none' : 'block';
+    if (!open && geminiApiKeyInput) geminiApiKeyInput.value = getGeminiKey();
+  });
+}
+if (btnSaveGeminiKey) {
+  btnSaveGeminiKey.addEventListener('click', () => {
+    const k = geminiApiKeyInput?.value.trim();
+    if (!k) { alert('\u8acb\u8f38\u5165 API Key'); return; }
+    localStorage.setItem(GEMINI_KEY_STORAGE, k);
+    geminiSettingsPanel.style.display = 'none';
+    updateGeminiModeLabel();
+    setStatus('\u2705 Gemini API Key \u5df2\u5132\u5b58\uff0c\u62cd\u7167\u5c07\u4f7f\u7528 Gemini Vision \u8fa8\u8b58');
+  });
+}
+if (btnClearGeminiKey) {
+  btnClearGeminiKey.addEventListener('click', () => {
+    localStorage.removeItem(GEMINI_KEY_STORAGE);
+    if (geminiApiKeyInput) geminiApiKeyInput.value = '';
+    updateGeminiModeLabel();
+    setStatus('\u5df2\u6e05\u9664 Gemini Key\uff0c\u5c07\u6539\u7528\u672c\u5730 OCR \u6a21\u5f0f');
+  });
+}
+updateGeminiModeLabel(); // \u9801\u9762\u8f09\u5165\u6642\u521d\u59cb\u5316\u6a21\u5f0f\u6a19\u793a
+
+// ===== Gemini Vision API \u8fa8\u8b58\u51fd\u5f0f =====
+async function analyzeWithGeminiVision(imageDataUrl) {
+  const apiKey = getGeminiKey();
+  if (!apiKey) throw new Error('No Gemini API Key');
+
+  // \u5c07 base64 img \u91cd\u65b0\u5206\u96e2\u70ba\u7d14 data
+  const base64Data = imageDataUrl.split(',')[1];
+  const mimeType   = imageDataUrl.split(';')[0].split(':')[1] || 'image/jpeg';
+
+  const prompt = `\u4f60\u662f\u4e00\u500b FedEx \u63d0\u55ae\u89e3\u6790\u52a9\u624b\u3002\u8acb\u5f9e\u9019\u5f35 FedEx \u570b\u969b\u5feb\u905e\u63d0\u55ae\u5716\u7247\u4e2d\uff0c
+\u7cbe\u78ba\u63d0\u53d6\u4ee5\u4e0b\u6b04\u4f4d\u3002\u53ea\u56de\u50b3 JSON\uff0c\u4e0d\u8981\u4efb\u4f55\u5176\u4ed6\u6587\u5b57\u3002
+
+{
+  "awb": "\u7d14\u6578\u5b6f\u8ffd\u8e64\u78bc\uff0c12\u4f4d\u6578\u5b57\uff0c\u79fb\u9664\u7a7a\u683c(\u4f86\u81ea TRK# \u6b04\u4f4d)",
+  "shipDate": "YYYY-MM-DD \u683c\u5f0f(\u4f86\u81ea SHIP DATE:)",
+  "senderName": "\u5bc4\u4ef6\u4eba\u59d3\u540d(\u4f86\u81ea SIGN: \u6b04\u4f4d\u6700\u53ef\u9760)",
+  "senderCompany": "\u5bc4\u4ef6\u4eba\u516c\u53f8\u540d",
+  "senderAddress": "\u5bc4\u4ef6\u4eba\u5730\u5740(\u4e00\u884c)",
+  "receiverName": "\u6536\u4ef6\u4eba\u59d3\u540d(TO \u5f8c\u7b2c\u4e00\u884c)",
+  "receiverCompany": "\u6536\u4ef6\u4eba\u516c\u53f8\u540d",
+  "receiverAddress": "\u6536\u4ef6\u4eba\u5b8c\u6574\u5730\u5740",
+  "description": "\u8ca8\u54c1\u8aaa\u660e(\u4f86\u81ea DESC1:)",
+  "weight": "\u5982 0.50 KG(\u4f86\u81ea ACTWGT:)",
+  "amount": "CUSTOMS VALUE \u7684\u7d14\u6578\u5b57",
+  "country": "\u76ee\u7684\u5730\u570b\u5bb6\u540d\u7a31"
+}`;
+
+  const resp = await fetch(
+    `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        contents: [{
+          parts: [
+            { text: prompt },
+            { inline_data: { mime_type: mimeType, data: base64Data } }
+          ]
+        }],
+        generationConfig: { temperature: 0, maxOutputTokens: 512 }
+      })
+    }
+  );
+
+  if (!resp.ok) {
+    const errBody = await resp.text();
+    throw new Error(`Gemini API \u932f\u8aa4 ${resp.status}: ${errBody}`);
+  }
+
+  const json = await resp.json();
+  const rawContent = json?.candidates?.[0]?.content?.parts?.[0]?.text || '';
+  // \u79fb\u9664 markdown \u4ee3\u78bc\u5340\u584a\u7b26\u865f\u518d\u89e3\u6790
+  const cleanJson = rawContent.replace(/```json\s*/ig, '').replace(/```/g, '').trim();
+  return JSON.parse(cleanJson);
+}
+
+function fillFieldsFromGemini(data) {
+  if (data.awb)             awb.value         = data.awb;
+  if (data.shipDate)        dateEl.value       = data.shipDate;
+  if (data.senderName)      seller.value       = data.senderName;
+  if (data.senderCompany && !data.senderName)
+                            seller.value       = data.senderCompany;
+  const sAddr = [data.senderCompany, data.senderAddress].filter(Boolean).join('\n');
+  if (sAddr)                sellerAddr.value   = sAddr;
+  if (data.receiverName)    buyer.value        = data.receiverName;
+  if (data.receiverCompany && !data.receiverName)
+                            buyer.value        = data.receiverCompany;
+  const rAddr = [data.receiverCompany, data.receiverAddress].filter(Boolean).join('\n');
+  if (rAddr)                buyerAddr.value    = rAddr;
+  if (data.description)     desc.value         = data.description;
+  if (data.weight)          weight.value       = data.weight;
+  if (data.amount)          amount.value       = data.amount;
+  if (data.country)         countryEl.value    = data.country;
+}
+
+// ===== \u62cd\u7167\u6d41\u7a0b\uff1aGemini Vision \u512a\u5148\uff0c\u964d\u7d1a\u70ba Tesseract =====
 if (photoInput) {
   photoInput.addEventListener("change", async (e) => {
     const file = e.target.files?.[0];
     if (!file) return;
     try {
-      setStatus('讀取圖片中…');
+      setStatus('\u8b80\u53d6\u5716\u7247\u4e2d\u2026');
       const { canvas } = await loadImageToCanvas(file);
-      setStatus('擷取文字中…');
-      const txt = await extractTextFromImage(canvas);
-      rawText.value = (txt || '').trim();
-      setStatus(txt && txt.trim() ? '已擷取文字，請按「使用文字智能帶入（NER）」' : '未擷取到可用文字，請嘗試較清晰的照片');
+      const apiKey = getGeminiKey();
+
+      if (apiKey) {
+        // === Gemini Vision \u8def\u5f91 ===
+        setStatus('\u2728 \u4f7f\u7528 Gemini Vision \u8fa8\u8b58\u4e2d\uff0c\u8acb\u7a0d\u5019\u2026');
+        const dataUrl = canvas.toDataURL('image/jpeg', 0.85);
+        const geminiData = await analyzeWithGeminiVision(dataUrl);
+        fillFieldsFromGemini(geminiData);
+        rawText.value = JSON.stringify(geminiData, null, 2); // \u986f\u793a\u89e3\u6790\u7d50\u679c\u65bc\u6587\u5b57\u6846
+        setStatus('\u2705 Gemini Vision \u8fa8\u8b58\u5b8c\u6210\uff01\u8acb\u78ba\u8a8d\u6b04\u4f4d\u5167\u5bb9');
+      } else {
+        // === Tesseract OCR \u964d\u7d1a\u8def\u5f91 ===
+        setStatus('\ud83d\udcf7 \u4f7f\u7528\u672c\u5730 OCR \u64f7\u53d6\u4e2d\u2026');
+        const txt = await extractTextFromImage(canvas);
+        rawText.value = (txt || '').trim();
+        setStatus(txt && txt.trim()
+          ? '\u5df2\u64f7\u53d6\u6587\u5b57\uff0c\u8acb\u6309\u300c\u4f7f\u7528\u6587\u5b57\u667a\u80fd\u5e36\u5165\uff08NER\uff09\u300d'
+          : '\u672a\u64f7\u53d6\u5230\u53ef\u7528\u6587\u5b57\uff0c\u8acb\u5617\u8a66\u8f03\u6e05\u6670\u7684\u7167\u7247');
+      }
     } catch (err) {
       console.error(err);
-      setStatus('擷取文字失敗：' + (err?.message || err));
+      setStatus('\u8fa8\u8b58\u5931\u6557\uff1a' + (err?.message || err));
     } finally {
       photoInput.value = '';
     }
@@ -180,18 +321,18 @@ function parseTextWithNER(text) {
   }
   if (postalCode) out.postalCode = postalCode;
 
-  // AWB — 優先抓 TRK# 後面的 12 位數字（FedEx 標準格式），其次才用英數字段
-  // 避免抓到追蹤碼的英文代碼（如 V8CPQX）
+  // AWB — 優先抓 TRK# 或 OCR 誤讀版本（TK!/TK#）後面的 12 位數字
   const awbMatch =
-    whole.match(/(?:TRK#?|TRACKING(?:\s*NO\.?)?)\s*([\d\s]{10,16})/) ||
+    whole.match(/T[RK][K#!]?\s*[#!]?\s*([\d\s]{10,18})/) ||
     whole.match(/(?:AWB|WAYBILL|提單|單號)\s*[:：#]?\s*(\d[\d\s-]{8,16}\d)/) ||
     whole.match(/\b(\d{4}[\s-]?\d{4}[\s-]?\d{4})\b/);
   if (awbMatch) out.awb = (awbMatch[1] || awbMatch[0]).replace(/[\s-]/g, '').trim();
 
-  // Date — 支援 YYYY-MM-DD、YYYYMMDD、以及 FedEx 格式 DDJUN18 / Ship Date:
+  // Date — SHIP DATE 最優先（FedEx 專屬），再試 ISO 格式
   const dateMatch =
+    whole.match(/SHIP\s*DATE\s*[:：]?\s*(\d{1,2}[A-Z]{3}\d{2,4})/i) ||
     whole.match(/\b(20\d{2}[-/]\d{1,2}[-/]\d{1,2})\b/) ||
-    whole.match(/(?:SHIP\s*DATE|DATE|日期)\s*[:：]?\s*(\d{1,2}[A-Z]{3}\d{2,4}|[\dA-Za-z/.-]{6,15})/i);
+    whole.match(/(?:DATE|日期)\s*[:：]?\s*(\d{1,2}[A-Z]{3}\d{2,4}|[\dA-Za-z/.-]{6,15})/i);
   if (dateMatch) {
     let dStr = (dateMatch[1] || dateMatch[0]).trim();
     // 轉換 FedEx 簡短月份格式如 25JUN18 → 2018-06-25
@@ -206,8 +347,16 @@ function parseTextWithNER(text) {
     out.date = dStr.trim();
   }
 
+  // SIGN: 欄位 — FedEx 提單的 SIGN: 直接就是寄件人姓名（最高可靠度）
+  const signMatch = whole.match(/SIGN\s*[:：]\s*([A-Za-z\u4e00-\u9fa5][A-Za-z\u4e00-\u9fa5\s.'-]{1,40})/i);
+  if (signMatch) out.senderName = signMatch[1].trim();
+
   // Weight (e.g. 5.5 KG, 10 LB)
-  const weightMatch = whole.match(/(?:WEIGHT|WT|重量|ACTUAL WGT)\s*[:：]?\s*(\d+(?:\.\d+)?\s*(?:KG|KGS|LB|LBS))/i) || whole.match(/\b(\d+(?:\.\d+)?\s*(?:KG|KGS|LB|LBS))\b/i);
+  // Weight — 優先抓 ACTWGT（FedEx 實際重量標籤，最可靠），其次才是通用關鍵字
+  const weightMatch =
+    whole.match(/ACTWGT\s*[:\uff1a]?\s*([\d.]+\s*(?:KG|KGS|LB|LBS))/i) ||
+    whole.match(/(?:ACTUAL\s*WGT|WEIGHT|WT|重量)\s*[:\uff1a]?\s*([\d.]+\s*(?:KG|KGS|LB|LBS))/i) ||
+    whole.match(/\b([\d.]+\s*(?:KG|KGS|LB|LBS))\b/i);
   if (weightMatch) out.weight = (weightMatch[1] || weightMatch[0]).toUpperCase().trim();
 
   // Pieces (Qty)
@@ -596,47 +745,45 @@ btnPdf.addEventListener("click", async () => {
       if (line.trim()) drawField(line.trim(), x, currentY);
     };
 
-    // ===== 動態比例座標（依據實際 PDF 視覺截圖完美校準版）=====
-    // 所有坐標 Y 軸從下方起算，比例已精確對齊各個欄位框內
+    // ===== 精確座標（由校準工具實際點擊 PDF 模板測量）=====
 
-    // #1 AWB 編號 — INTERNATIONAL AIR WAYBILL NO. 右格
-    drawField(data.awb, pgW * 0.16, pgH * 0.911);
+    // #1 AWB 編號
+    drawField(data.awb, pgW * 0.1827, pgH * 0.912);
 
-    // #2 出口日期 — DATE OF EXPORTATION 格子內
-    drawField(data.date, pgW * 0.05, pgH * 0.866);
+    // #2 出口日期
+    drawField(data.date, pgW * 0.2301, pgH * 0.8759);
 
-    // #3 寄件人 — SHIPPER/EXPORTER 框內 (Y=0.797)
-    drawField(data.seller,    pgW * 0.02, pgH * 0.797);
-    wrapText(data.sellerAddr, pgW * 0.02, pgH * 0.777, pgW * 0.44);
+    // #3 寄件人
+    drawField(data.seller,    pgW * 0.0225, pgH * 0.8173);
+    wrapText(data.sellerAddr, pgW * 0.0225, pgH * 0.8072, pgW * 0.44);
 
-    // #4 收件人 — CONSIGNEE 框內 (Y=0.797)
-    drawField(data.buyer,    pgW * 0.52, pgH * 0.797);
-    wrapText(data.buyerAddr, pgW * 0.52, pgH * 0.777, pgW * 0.44);
+    // #4 收件人
+    drawField(data.buyer,    pgW * 0.6833, pgH * 0.8307);
+    wrapText(data.buyerAddr, pgW * 0.4164, pgH * 0.8164, pgW * 0.44);
 
-    // ===== 明細表格 (第一資料列: Y=0.654，對齊欄首下方) =====
-    // #5 件數 — NO. OF PKGS 欄
-    drawField(data.pieces, pgW * 0.13, pgH * 0.654);
+    // #5 件數（表格第一列，與描述同 Y）
+    drawField(data.pieces, pgW * 0.1744, pgH * 0.5524);
 
-    // #6 貨品描述 — FULL DESCRIPTION OF GOODS 欄
-    drawField(data.desc,   pgW * 0.22, pgH * 0.654);
+    // #6 貨品描述
+    drawField(data.desc, pgW * 0.4104, pgH * 0.5524);
 
-    // #7 重量 — WEIGHT 欄
-    drawField(data.weight, pgW * 0.57, pgH * 0.654);
+    // #7 重量
+    drawField(data.weight, pgW * 0.7307, pgH * 0.5557);
 
-    // #8 單價 — UNIT VALUE 欄
-    drawField(data.amount, pgW * 0.72, pgH * 0.654);
+    // #8 單價
+    drawField(data.amount, pgW * 0.79, pgH * 0.5566);
 
-    // #8 總價 — TOTAL VALUE 欄
-    drawField(data.amount, pgW * 0.84, pgH * 0.654);
+    // #8 總價
+    drawField(data.amount, pgW * 0.8695, pgH * 0.5557);
 
-    // ===== 底部合計區 (Y=0.250，對齊總計格子) =====
-    drawField(data.pieces, pgW * 0.13, pgH * 0.250);
-    drawField(data.weight, pgW * 0.57, pgH * 0.250);
-    drawField(data.amount, pgW * 0.84, pgH * 0.250);
+    // 底部合計區
+    drawField(data.pieces, pgW * 0.1744, pgH * 0.2347);
+    drawField(data.weight, pgW * 0.7343, pgH * 0.2347);
+    drawField(data.amount, pgW * 0.8731, pgH * 0.2355);
 
-    // ===== 簽名欄區段 (Y=0.125，放置於底線上方) =====
-    drawField(data.seller, pgW * 0.02, pgH * 0.125);
-    drawField(data.date,   pgW * 0.50, pgH * 0.125);
+    // 簽名欄
+    drawField(data.seller, pgW * 0.0225, pgH * 0.1257);
+    drawField(data.date,   pgW * 0.7331, pgH * 0.1257);
 
     const pdfBytes = await pdf.save();
     const blob = new Blob([pdfBytes], { type: "application/pdf" });

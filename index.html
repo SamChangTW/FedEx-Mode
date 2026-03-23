@@ -49,7 +49,7 @@
 
   <script>
     // 設定當前版本號 (每次發布新版時，改這個字串就能強制用戶更新)
-    const APP_VERSION = 'v1.8-ner-final-fix';
+    const APP_VERSION = 'v1.9-gemini';
 
     // 顯示 Toast 通知（取代阻塞式 alert）
     function showUpdateToast(msg) {
@@ -129,6 +129,26 @@
   <main>
     <section class="tsaa-card">
       <h2>1) 取像與文字</h2>
+
+      <!-- Gemini API Key 設定區 -->
+      <div id="geminiSettingsBar" style="margin-bottom:10px;">
+        <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+          <span id="geminiModeLabel" style="font-size:12px;font-weight:700;"></span>
+          <button id="btnToggleGeminiSettings" type="button" class="tsaa-btn" style="font-size:11px;padding:4px 10px;">&#9881; Gemini 設定</button>
+        </div>
+        <div id="geminiSettingsPanel" style="display:none;margin-top:8px;padding:10px;background:rgba(200,180,126,0.08);border-radius:8px;border:1px solid rgba(200,180,126,0.3);">
+          <label style="font-size:12px;display:block;margin-bottom:6px;color:#C8B47E;">✨ Gemini API Key（儲存於本機，不會上傳）</label>
+          <div style="display:flex;gap:6px;">
+            <input id="geminiApiKeyInput" type="password" placeholder="輸入 Gemini API Key"
+              style="flex:1;background:#0d1422;border:1px solid #C8B47E33;border-radius:6px;padding:6px 10px;color:#eee;font-size:13px;"
+            />
+            <button id="btnSaveGeminiKey" type="button" class="tsaa-btn" style="font-size:12px;">&#10003; 儲存</button>
+            <button id="btnClearGeminiKey" type="button" class="tsaa-btn" style="font-size:12px;background:#8B3A3A;">&#10005; 清除</button>
+          </div>
+          <small style="color:#aaa;margin-top:4px;display:block;">從 <a href="https://aistudio.google.com/app/apikey" target="_blank" style="color:#C8B47E;">Google AI Studio</a> 取得免費 Key</small>
+        </div>
+      </div>
+
       <div class="row" style="gap:8px; align-items:center; flex-wrap:wrap;">
         <label id="btnCameraText" for="photoInput" role="button" class="tsaa-btn">
           啟動相機（拍照取文字）
@@ -140,7 +160,7 @@
         style="position:absolute;left:-9999px;width:1px;height:1px;opacity:0;" />
       <textarea id="rawText" rows="5" placeholder="將從相片擷取的文字會顯示在此，或可直接貼上（標籤、AWB、發票或螢幕截圖文字）"></textarea>
       <small style="display:block;opacity:.7;margin-top:4px;line-height:1.4;">
-        說明：本流程改為「拍照 → 取文字 → NER 智能解析」。若裝置支援 TextDetector 將離線識別，否則使用輕量 OCR 後再解析。
+        說明：有 Gemini API Key 時拍照將直接由 AI 辨識填入欄位。無 Key 時降級為本地 Tesseract OCR + NER。
       </small>
     </section>
 
@@ -218,7 +238,7 @@
   <script src="https://cdn.jsdelivr.net/npm/pdf-lib@1.17.1/dist/pdf-lib.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
   <!-- 主邏輯 -->
-  <script src="main.js?v=ner-final-fix"></script>
+  <script src="main.js?v=gemini"></script>
   <!-- 主題載入（最後執行，供覆蓋 CSS 變數）-->
   <script src="ui/theme-loader.js"></script>
 </body>

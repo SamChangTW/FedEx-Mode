@@ -1,12 +1,12 @@
 // 1. 修改版本號 (這是讓手機知道要更新的關鍵)
-const CACHE_NAME = 'fedex-ocr-v1.8-final-fix';
+const CACHE_NAME = 'fedex-ocr-v1.9-gemini';
 
 // 2. 更新快取清單 (加入新版 main.js 和 PDF)
 const ASSETS = [
   './',
   './index.html',
   './style.css',
-  './main.js?v=ner-final-fix', // 重要：這裡要跟 index.html 的引用一致
+  './main.js?v=gemini', // 重要：這裡要跟 index.html 的引用一致
   './manifest.json',
   './assets/fedex-commercial-invoice-form-tw.pdf', // 模板檔案
   './assets/FedEx icon.png',                        // PWA 圖示
