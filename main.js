@@ -152,7 +152,7 @@ async function analyzeWithGeminiVision(imageDataUrl) {
             { inline_data: { mime_type: mimeType, data: base64Data } }
           ]
         }],
-        generationConfig: { temperature: 0, maxOutputTokens: 512 }
+        generationConfig: { temperature: 0, responseMimeType: "application/json" }
       })
     }
   );
@@ -186,7 +186,12 @@ async function analyzeWithGeminiVision(imageDataUrl) {
   const rawContent = json?.candidates?.[0]?.content?.parts?.[0]?.text || '';
   // \u79fb\u9664 markdown \u4ee3\u78bc\u5340\u584a\u7b26\u865f\u518d\u89e3\u6790
   const cleanJson = rawContent.replace(/```json\s*/ig, '').replace(/```/g, '').trim();
-  return JSON.parse(cleanJson);
+  try {
+    return JSON.parse(cleanJson);
+  } catch (err) {
+    console.error("Gemini Raw Output:", rawContent);
+    throw new Error(`JSON 解析失敗: ${err.message}\nGemini 回傳內容: ${rawContent.substring(0,100)}...`);
+  }
 }
 
 function fillFieldsFromGemini(data) {
