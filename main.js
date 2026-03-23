@@ -167,7 +167,19 @@ async function analyzeWithGeminiVision(imageDataUrl) {
     }
   }
   if (!resp || !resp.ok) {
-    throw new Error(`所有模型盯失敗:\n` + allErrors.join('\n'));
+    let availableModels = '';
+    try {
+      const listResp = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?key=${apiKey}`);
+      if (listResp.ok) {
+        const listJson = await listResp.json();
+        const models = (listJson.models || [])
+          .filter(m => m.supportedGenerationMethods && m.supportedGenerationMethods.includes('generateContent'))
+          .map(m => m.name.split('/')[1])
+          .join(', ');
+        availableModels = `\n\n[系統偵測] 您這個 API Key 有權限調用的模型有：\n${models}`;
+      }
+    } catch(e) {}
+    throw new Error(`所有模型皆失敗:\n` + allErrors.join('\n') + availableModels);
   }
 
   const json = await resp.json();
