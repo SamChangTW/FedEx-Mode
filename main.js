@@ -130,16 +130,18 @@ async function analyzeWithGeminiVision(imageDataUrl) {
   // 依序嘗試多個模型，直到成功為止
   const MODELS_TO_TRY = [
     'v1beta/models/gemini-2.0-flash:generateContent',
-    'v1beta/models/gemini-1.5-flash:generateContent',
-    'v1beta/models/gemini-1.5-pro:generateContent',
-    'v1beta/models/gemini-pro-vision:generateContent',
+    'v1/models/gemini-1.5-flash:generateContent',
+    'v1beta/models/gemini-1.5-flash-latest:generateContent',
+    'v1beta/models/gemini-1.5-flash-8b:generateContent',
+    'v1beta/models/gemini-1.5-pro-latest:generateContent'
   ];
 
   let resp = null;
-  let lastErr = '';
+  let allErrors = [];
   for (const modelPath of MODELS_TO_TRY) {
     const url = `https://generativelanguage.googleapis.com/${modelPath}?key=${apiKey}`;
-    resp = await fetch(url,
+    try {
+      resp = await fetch(url,
     {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -155,13 +157,17 @@ async function analyzeWithGeminiVision(imageDataUrl) {
     }
   );
 
-    if (resp.ok) break; // 成功，跳出迴圈
-    lastErr = `${resp.status}`;
-    // 發生 404(找不到模型)、429(配額用盡) 或其他錯誤時，都繼續嘗試下一個模型
+      if (resp.ok) break;
+      const errText = await resp.text();
+      let shortErr = errText;
+      try { shortErr = JSON.parse(errText).error.message; } catch(e){}
+      allErrors.push(`[${modelPath.split('/')[2].split(':')[0]}] ${resp.status}: ${shortErr}`);
+    } catch(e) {
+      allErrors.push(`[${modelPath.split('/')[2].split(':')[0]}] Err: ${e.message}`);
+    }
   }
   if (!resp || !resp.ok) {
-    const errBody = resp ? await resp.text() : 'No response';
-    throw new Error(`Gemini API \u932f\u8aa4 ${lastErr} (All fallbacks failed): ${errBody}`);
+    throw new Error(`所有模型盯失敗:\n` + allErrors.join('\n'));
   }
 
   const json = await resp.json();
