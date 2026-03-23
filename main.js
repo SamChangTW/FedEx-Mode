@@ -129,11 +129,11 @@ async function analyzeWithGeminiVision(imageDataUrl) {
 
   // 依序嘗試多個模型，直到成功為止
   const MODELS_TO_TRY = [
-    'v1beta/models/gemini-2.0-flash:generateContent',
-    'v1/models/gemini-1.5-flash:generateContent',
-    'v1beta/models/gemini-1.5-flash-latest:generateContent',
-    'v1beta/models/gemini-1.5-flash-8b:generateContent',
-    'v1beta/models/gemini-1.5-pro-latest:generateContent'
+    'v1beta/models/gemini-2.5-flash:generateContent',
+    'v1beta/models/gemini-flash-latest:generateContent',
+    'v1beta/models/gemini-3-flash-preview:generateContent',
+    'v1beta/models/gemini-2.0-flash-lite:generateContent',
+    'v1beta/models/gemini-2.0-flash:generateContent'
   ];
 
   let resp = null;
