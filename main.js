@@ -157,11 +157,11 @@ async function analyzeWithGeminiVision(imageDataUrl) {
 
     if (resp.ok) break; // 成功，跳出迴圈
     lastErr = `${resp.status}`;
-    if (resp.status !== 404) break; // 非 404 錯誤不繼續嘗試
+    // 發生 404(找不到模型)、429(配額用盡) 或其他錯誤時，都繼續嘗試下一個模型
   }
   if (!resp || !resp.ok) {
     const errBody = resp ? await resp.text() : 'No response';
-    throw new Error(`Gemini API \u932f\u8aa4 ${lastErr}: ${errBody}`);
+    throw new Error(`Gemini API \u932f\u8aa4 ${lastErr} (All fallbacks failed): ${errBody}`);
   }
 
   const json = await resp.json();
