@@ -783,45 +783,23 @@ btnPdf.addEventListener("click", async () => {
       if (line.trim()) drawField(line.trim(), x, currentY);
     };
 
-    // ===== 精確座標（由校準工具實際點擊 PDF 模板測量）=====
-
-    // #1 AWB 編號
-    drawField(data.awb, pgW * 0.1827, pgH * 0.912);
-
-    // #2 出口日期
-    drawField(data.date, pgW * 0.2301, pgH * 0.8759);
-
-    // #3 寄件人
-    drawField(data.seller,    pgW * 0.0225, pgH * 0.8173);
-    wrapText(data.sellerAddr, pgW * 0.0225, pgH * 0.8072, pgW * 0.44);
-
-    // #4 收件人
-    drawField(data.buyer,    pgW * 0.6833, pgH * 0.8307);
-    wrapText(data.buyerAddr, pgW * 0.4164, pgH * 0.8164, pgW * 0.44);
-
-    // #5 件數（表格第一列，與描述同 Y）
-    drawField(data.pieces, pgW * 0.1744, pgH * 0.5524);
-
-    // #6 貨品描述
-    drawField(data.desc, pgW * 0.4104, pgH * 0.5524);
-
-    // #7 重量
-    drawField(data.weight, pgW * 0.7307, pgH * 0.5557);
-
-    // #8 單價
-    drawField(data.amount, pgW * 0.79, pgH * 0.5566);
-
-    // #8 總價
-    drawField(data.amount, pgW * 0.8695, pgH * 0.5557);
-
-    // 底部合計區
-    drawField(data.pieces, pgW * 0.1744, pgH * 0.2347);
-    drawField(data.weight, pgW * 0.7343, pgH * 0.2347);
-    drawField(data.amount, pgW * 0.8731, pgH * 0.2355);
-
-    // 簽名欄
-    drawField(data.seller, pgW * 0.0225, pgH * 0.1257);
-    drawField(data.date,   pgW * 0.7331, pgH * 0.1257);
+    // ===== 精確座標（由校準工具測量）=====
+    drawField(data.awb, pgW * 0.1732, pgH * 0.9103); // #1 AWB 編號
+    drawField(data.date, pgW * 0.2254, pgH * 0.8759); // #2 出口日期
+    drawField(data.seller, pgW * 0.0166, pgH * 0.8181); // #3 寄件人名稱
+    wrapText(data.sellerAddr, pgW * 0.0166, pgH * 0.8039, pgW * 0.44); // #3 寄件人地址
+    drawField(data.buyer, pgW * 0.6809, pgH * 0.8315); // #4 收件人名稱
+    wrapText(data.buyerAddr, pgW * 0.4531, pgH * 0.8139, pgW * 0.44); // #4 收件人地址
+    drawField(data.pieces, pgW * 0.1791, pgH * 0.5499); // #5 件數
+    drawField(data.desc, pgW * 0.4045, pgH * 0.5516); // #6 貨品描述
+    drawField(data.weight, pgW * 0.7189, pgH * 0.5566); // #7 重量
+    drawField(data.amount, pgW * 0.79, pgH * 0.5583); // #8 單價
+    drawField(data.amount, pgW * 0.8707, pgH * 0.5566); // #8 總價
+    drawField(data.pieces, pgW * 0.1684, pgH * 0.2355); // 底部合計件數
+    drawField(data.weight, pgW * 0.7177, pgH * 0.2372); // 底部合計重量
+    drawField(data.amount, pgW * 0.8553, pgH * 0.2372); // 底部合計金額
+    drawField(data.seller, pgW * 0.2028, pgH * 0.1199); // 簽名欄-名稱
+    drawField(data.date, pgW * 0.7141, pgH * 0.1182); // 簽名欄-日期
 
     const pdfBytes = await pdf.save();
     const blob = new Blob([pdfBytes], { type: "application/pdf" });
