@@ -1,70 +1,80 @@
-// 1. 修改版本號 (這是讓手機知道要更新的關鍵)
-const CACHE_NAME = 'fedex-ocr-v1.9-gemini';
+// Service Worker — FedEx OCR PWA
+// 版本號與 index.html 的 APP_VERSION 保持一致
+const CACHE_VERSION = 'v1.9-gemini';
+const CACHE_NAME = `fedex-ocr-${CACHE_VERSION}`;
 
-// 2. 更新快取清單 (加入新版 main.js 和 PDF)
-const ASSETS = [
+// 核心資源：必須全數快取成功，PWA 才能離線運作
+const CRITICAL_ASSETS = [
   './',
   './index.html',
   './style.css',
-  './main.js?v=gemini', // 重要：這裡要跟 index.html 的引用一致
+  './main.js?v=gemini',
   './manifest.json',
-  './assets/fedex-commercial-invoice-form-tw.pdf', // 模板檔案
-  './assets/FedEx icon.png',                        // PWA 圖示
   './ui/tsaa_tokens.css',
   './ui/theme-loader.js',
-  'https://cdn.jsdelivr.net/npm/pdf-lib@1.17.1/dist/pdf-lib.min.js', // 外部套件也快取
-  'https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js'
+  './assets/fedex-commercial-invoice-form-tw.pdf',
+  './assets/FedEx icon.png',
 ];
 
-// 安裝事件：下載核心檔案
+// 選用資源：CDN 套件，快取失敗不影響 SW 安裝
+const OPTIONAL_CDN_ASSETS = [
+  'https://cdn.jsdelivr.net/npm/pdf-lib@1.17.1/dist/pdf-lib.min.js',
+  'https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js',
+];
+
+// 安裝事件：核心資源整批快取，CDN 資源逐一嘗試（失敗不阻斷）
 self.addEventListener('install', event => {
-  // 強制跳過等待，立即啟用新版 SW
   self.skipWaiting();
-
   event.waitUntil(
-    caches.open(CACHE_NAME)
-      .then(cache => {
-        console.log('[SW] 安裝中，正在快取檔案...');
-        return cache.addAll(ASSETS);
-      })
-  );
-});
+    caches.open(CACHE_NAME).then(async cache => {
+      console.log('[SW] 安裝中，快取核心資源...');
+      await cache.addAll(CRITICAL_ASSETS);
+      console.log('[SW] 核心資源快取完成');
 
-// 啟動事件：刪除舊版快取
-self.addEventListener('activate', event => {
-  event.waitUntil(
-    caches.keys().then(cacheNames => {
-      return Promise.all(
-        cacheNames.map(cacheName => {
-          // 如果快取名稱跟現在的不一樣，就刪掉 (例如刪除 fedex-ocr-r11)
-          if (cacheName !== CACHE_NAME) {
-            console.log('[SW] 刪除舊快取:', cacheName);
-            return caches.delete(cacheName);
-          }
-        })
+      await Promise.allSettled(
+        OPTIONAL_CDN_ASSETS.map(url =>
+          cache.add(url).catch(err =>
+            console.warn(`[SW] CDN 資源快取失敗（非致命）: ${url}`, err)
+          )
+        )
       );
-    }).then(() => {
-      console.log('[SW] 新版已啟用，接管頁面');
-      return self.clients.claim();
+      console.log('[SW] CDN 資源快取嘗試完成');
     })
   );
 });
 
-// 請求攔截：網路優先 (Network First)
-// 邏輯：先嘗試去網路上抓最新的 -> 抓不到(離線)才去讀快取 -> 再沒有就回傳 index.html
+// 啟動事件：清除所有舊版快取，接管頁面
+self.addEventListener('activate', event => {
+  event.waitUntil(
+    caches.keys()
+      .then(cacheNames =>
+        Promise.all(
+          cacheNames
+            .filter(cacheName => cacheName !== CACHE_NAME)
+            .map(cacheName => {
+              console.log('[SW] 刪除舊快取:', cacheName);
+              return caches.delete(cacheName);
+            })
+        )
+      )
+      .then(() => {
+        console.log('[SW] 新版已啟用，接管頁面');
+        return self.clients.claim();
+      })
+  );
+});
+
+// 請求攔截：Network First — 先嘗試網路，失敗才讀快取，導覽請求降級至首頁
 self.addEventListener('fetch', event => {
   event.respondWith(
-    fetch(event.request)
-      .catch(() => {
-        console.log('[SW] 網路失敗，切換至快取模式:', event.request.url);
-        return caches.match(event.request)
-          .then(response => {
-            if (response) return response;
-            // 如果是導覽請求(HTML)且找不到，回傳首頁
-            if (event.request.mode === 'navigate') {
-              return caches.match('./index.html');
-            }
-          });
-      })
+    fetch(event.request).catch(() => {
+      console.log('[SW] 網路失敗，切換至快取模式:', event.request.url);
+      return caches.match(event.request).then(response => {
+        if (response) return response;
+        if (event.request.mode === 'navigate') {
+          return caches.match('./index.html');
+        }
+      });
+    })
   );
 });

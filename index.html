@@ -6,7 +6,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <meta name="description" content="拍照 OCR 智能帶入欄位，一鍵生成 FedEx 商業發票 PDF，支援離線使用（PWA）" />
   <meta name="theme-color" content="#C8B47E" />
-  <title>FedEx 模式｜OCR 商業發票 v1.8-Fix</title>
+  <title>FedEx 模式｜OCR 商業發票 v1.9-gemini</title>
   <link rel="manifest" href="manifest.json">
 
   <!-- 所有樣式表集中在 head，避免 FOUC（樣式閃爍）-->
@@ -48,68 +48,37 @@
   </style>
 
   <script>
-    // 設定當前版本號 (每次發布新版時，改這個字串就能強制用戶更新)
     const APP_VERSION = 'v1.9-gemini';
 
-    // 顯示 Toast 通知（取代阻塞式 alert）
     function showUpdateToast(msg) {
       const el = document.getElementById('update-toast');
-      if (!el) {
-        // DOM 尚未就緒時，建立元素
-        const div = document.createElement('div');
-        div.id = 'update-toast';
-        div.textContent = msg;
-        document.body.appendChild(div);
-        div.style.display = 'block';
-      } else {
-        el.textContent = msg;
-        el.style.display = 'block';
-      }
+      if (el) { el.textContent = msg; el.style.display = 'block'; }
     }
 
-    // 檢查用戶手機裡的標記是否為最新
+    // 版本檢查：await 確保清除完成後才 reload，消除競態條件
     if (localStorage.getItem('pwa_version') !== APP_VERSION) {
-      console.log('偵測到舊版本，開始強制清理...');
-
-      // 1. 註銷所有 Service Worker (殺死舊守門員)
-      if ('serviceWorker' in navigator) {
-        navigator.serviceWorker.getRegistrations().then(function (registrations) {
-          for (let registration of registrations) {
-            registration.unregister();
-            console.log('舊版 SW 已註銷');
-          }
-        });
-      }
-
-      // 2. 刪除所有快取檔案 (清空舊倉庫)
-      if ('caches' in window) {
-        caches.keys().then(function (names) {
-          for (let name of names) {
-            caches.delete(name);
-            console.log('舊快取已刪除:', name);
-          }
-        });
-      }
-
-      // 3. 更新標記並強制重整
-      localStorage.setItem('pwa_version', APP_VERSION);
-
-      // 延遲 300ms 確保刪除完成後，以 Toast 通知並強制重整頁面
-      setTimeout(() => {
-        // 若 body 已存在，顯示 Toast；否則直接重整
-        if (document.body) {
-          showUpdateToast('✨ 系統已更新至最新版 (v1.8)，正在重新載入…');
+      (async () => {
+        console.log('[PWA] 偵測到舊版本，開始強制清理...');
+        if ('serviceWorker' in navigator) {
+          const registrations = await navigator.serviceWorker.getRegistrations();
+          await Promise.all(registrations.map(r => r.unregister()));
+          console.log('[PWA] 舊版 SW 已全數註銷');
         }
+        if ('caches' in window) {
+          const cacheNames = await caches.keys();
+          await Promise.all(cacheNames.map(name => caches.delete(name)));
+          console.log('[PWA] 所有舊快取已清除');
+        }
+        localStorage.setItem('pwa_version', APP_VERSION);
+        showUpdateToast(`✨ 系統已更新至最新版 (${APP_VERSION})，正在重新載入…`);
         setTimeout(() => window.location.reload(true), 1500);
-      }, 300);
-
+      })();
     } else {
-      // === 如果版本已經是最新的，則正常註冊 SW ===
       if ('serviceWorker' in navigator) {
         window.addEventListener('load', () => {
           navigator.serviceWorker.register('./sw.js')
-            .then(reg => console.log('SW 註冊成功:', reg.scope))
-            .catch(err => console.log('SW 註冊失敗:', err));
+            .then(reg => console.log('[PWA] SW 註冊成功:', reg.scope))
+            .catch(err => console.error('[PWA] SW 註冊失敗:', err));
         });
       }
     }
@@ -123,7 +92,7 @@
 
   <header>
     <h1>商業發票（OCR）</h1>
-    <div class="sub">v1.8-Fix · 手機版 · 鈦灰 × 香檳金</div>
+    <div class="sub" id="app-subtitle">v1.9-gemini · 手機版 · 鈦灰 × 香檳金</div>
   </header>
 
   <main>
@@ -131,21 +100,21 @@
       <h2>1) 取像與文字</h2>
 
       <!-- Gemini API Key 設定區 -->
-      <div id="geminiSettingsBar" style="margin-bottom:10px;">
-        <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
-          <span id="geminiModeLabel" style="font-size:12px;font-weight:700;"></span>
-          <button id="btnToggleGeminiSettings" type="button" class="tsaa-btn" style="font-size:11px;padding:4px 10px;">&#9881; Gemini 設定</button>
+      <div id="geminiSettingsBar">
+        <div class="gemini-settings-header">
+          <span id="geminiModeLabel" class="gemini-mode-label"></span>
+          <button id="btnToggleGeminiSettings" type="button" class="tsaa-btn btn-sm">&#9881; Gemini 設定</button>
         </div>
-        <div id="geminiSettingsPanel" style="display:none;margin-top:8px;padding:10px;background:rgba(200,180,126,0.08);border-radius:8px;border:1px solid rgba(200,180,126,0.3);">
-          <label style="font-size:12px;display:block;margin-bottom:6px;color:#C8B47E;">✨ Gemini API Key（儲存於本機，不會上傳）</label>
-          <div style="display:flex;gap:6px;">
-            <input id="geminiApiKeyInput" type="password" placeholder="輸入 Gemini API Key"
-              style="flex:1;background:#0d1422;border:1px solid #C8B47E33;border-radius:6px;padding:6px 10px;color:#eee;font-size:13px;"
-            />
-            <button id="btnSaveGeminiKey" type="button" class="tsaa-btn" style="font-size:12px;">&#10003; 儲存</button>
-            <button id="btnClearGeminiKey" type="button" class="tsaa-btn" style="font-size:12px;background:#8B3A3A;">&#10005; 清除</button>
+        <div id="geminiSettingsPanel">
+          <div class="gemini-panel-inner">
+            <label class="gemini-panel-label">✨ Gemini API Key（儲存於本機，不會上傳）</label>
+            <div class="gemini-key-row">
+              <input id="geminiApiKeyInput" type="password" placeholder="輸入 Gemini API Key" class="gemini-key-input" />
+              <button id="btnSaveGeminiKey" type="button" class="tsaa-btn btn-sm">&#10003; 儲存</button>
+              <button id="btnClearGeminiKey" type="button" class="tsaa-btn btn-sm btn-danger">&#10005; 清除</button>
+            </div>
+            <small class="gemini-key-hint">從 <a href="https://aistudio.google.com/app/apikey" target="_blank">Google AI Studio</a> 取得免費 Key</small>
           </div>
-          <small style="color:#aaa;margin-top:4px;display:block;">從 <a href="https://aistudio.google.com/app/apikey" target="_blank" style="color:#C8B47E;">Google AI Studio</a> 取得免費 Key</small>
         </div>
       </div>
 

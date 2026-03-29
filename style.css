@@ -146,3 +146,89 @@ button:active, .tsaa-btn:active {
   border: 1px solid rgba(158,162,169,0.4);
   border-radius: 12px; background: rgba(10,14,24,0.85);
 }
+
+/* ============== Gemini 設定面板 ============== */
+#geminiSettingsBar { margin-bottom: 10px; }
+
+.gemini-settings-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.gemini-mode-label {
+  font-size: var(--tsaa-font-size-xs);
+  font-weight: 700;
+}
+.gemini-mode-label.is-active  { color: var(--color-accent); }
+.gemini-mode-label.is-inactive { color: var(--color-text-subtle); }
+
+.btn-sm {
+  font-size: 11px !important;
+  padding: 4px 10px !important;
+}
+
+/* 面板收合/展開動畫（max-height 漸變） */
+#geminiSettingsPanel {
+  max-height: 0;
+  overflow: hidden;
+  opacity: 0;
+  transition: max-height 0.28s ease, opacity 0.28s ease, margin-top 0.28s ease;
+  margin-top: 0;
+}
+#geminiSettingsPanel.is-open {
+  max-height: 220px;
+  opacity: 1;
+  margin-top: 8px;
+}
+
+.gemini-panel-inner {
+  padding: 10px;
+  background: rgba(200, 180, 126, 0.08);
+  border-radius: 8px;
+  border: 1px solid rgba(200, 180, 126, 0.30);
+}
+.gemini-panel-label {
+  font-size: var(--tsaa-font-size-xs);
+  display: block;
+  margin-bottom: 6px;
+  color: var(--color-accent);
+}
+.gemini-key-row { display: flex; gap: 6px; }
+.gemini-key-input {
+  flex: 1;
+  background: #0d1422;
+  border: 1px solid rgba(200, 180, 126, 0.20);
+  border-radius: 6px;
+  padding: 6px 10px;
+  color: var(--color-text-main);
+  font-size: 13px;
+}
+.gemini-key-hint { color: var(--color-text-subtle); margin-top: 4px; display: block; }
+.gemini-key-hint a { color: var(--color-accent); }
+.btn-danger {
+  background: #8B3A3A !important;
+  border-color: #7a3232 !important;
+  color: var(--color-text-main) !important;
+}
+
+/* ============== 狀態訊息色彩 ============== */
+#outStatus {
+  font-size: 13px;
+  font-weight: 600;
+  transition: color 0.2s ease;
+}
+#outStatus.status-info    { color: var(--color-text-subtle); }
+#outStatus.status-success { color: var(--color-accent); }
+#outStatus.status-warning { color: var(--color-warning); }
+#outStatus.status-error   { color: #e05c5c; }
+
+/* ============== 按鈕禁用狀態 ============== */
+button:disabled,
+.tsaa-btn:disabled {
+  opacity: 0.38;
+  cursor: not-allowed;
+  pointer-events: none;
+  filter: grayscale(0.4);
+}

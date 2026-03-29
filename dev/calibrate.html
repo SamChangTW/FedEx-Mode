@@ -1,0 +1,225 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<title>Invoice 欄位座標校準工具</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: 'Segoe UI', sans-serif; background: #1a1a2e; color: #eee; display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
+
+  #topbar {
+    background: #16213e;
+    border-bottom: 2px solid #C8B47E;
+    padding: 10px 16px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    flex-shrink: 0;
+    flex-wrap: wrap;
+  }
+  #topbar h1 { font-size: 15px; color: #C8B47E; flex-shrink: 0; }
+  #coords { font-size: 13px; color: #a8e6cf; font-weight: bold; min-width: 220px; }
+  #fieldSelect { background: #0d0d1a; color: #C8B47E; border: 1px solid #C8B47E; border-radius: 4px; padding: 4px 8px; font-size: 13px; }
+  .btn { border: none; border-radius: 6px; padding: 6px 14px; cursor: pointer; font-weight: 700; font-size: 12px; transition: filter .15s; }
+  .btn:hover { filter: brightness(1.1); }
+  #markBtn { background: #C8B47E; color: #1a1a2e; }
+  #copyBtn { background: #27ae60; color: #fff; }
+  #clearBtn { background: #e74c3c; color: #fff; }
+  #fileBtn { background: #3498db; color: #fff; }
+  #fileInput { display: none; }
+
+  #main { display: flex; flex: 1; overflow: hidden; }
+  #canvasWrap { flex: 1; overflow: auto; background: #444; cursor: crosshair; }
+  #pdfCanvas { display: block; }
+
+  #sidebar {
+    width: 310px;
+    background: #16213e;
+    border-left: 2px solid #C8B47E;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    flex-shrink: 0;
+  }
+  #sidebar h2 { font-size: 13px; color: #C8B47E; padding: 10px 12px 6px; border-bottom: 1px solid #2a3a5e; }
+  #logList { flex: 1; overflow-y: auto; padding: 6px 10px; }
+  .entry { background: #0d0d1a; border-radius: 4px; padding: 6px 8px; margin: 4px 0; border-left: 3px solid #C8B47E; font-size: 12px; }
+  .entry .fname { color: #a8e6cf; font-weight: bold; display: block; }
+  .entry .coords { color: #f9ca24; }
+  #codeWrap { border-top: 2px solid #C8B47E; padding: 8px 10px; }
+  #codeWrap h2 { font-size: 13px; color: #C8B47E; margin-bottom: 6px; }
+  #codeOutput {
+    font-size: 10px; color: #a8e6cf; white-space: pre-wrap; word-break: break-all;
+    background: #0d0d1a; border-radius: 4px; padding: 8px; max-height: 220px; overflow-y: auto;
+    border: 1px solid #2a3a5e;
+  }
+  .hint { font-size: 11px; color: #aaa; padding: 8px 12px; }
+</style>
+</head>
+<body>
+
+<div id="topbar">
+  <h1>📐 Invoice 座標校準工具</h1>
+  <button class="btn" id="fileBtn" onclick="document.getElementById('fileInput').click()">📂 開啟 PDF 模板</button>
+  <input type="file" id="fileInput" accept=".pdf">
+  <div id="coords">請先開啟 PDF</div>
+  <select id="fieldSelect">
+    <option value="awb">#1 AWB 編號</option>
+    <option value="date">#2 出口日期</option>
+    <option value="seller">#3 寄件人名稱</option>
+    <option value="sellerAddr">#3 寄件人地址</option>
+    <option value="buyer">#4 收件人名稱</option>
+    <option value="buyerAddr">#4 收件人地址</option>
+    <option value="pieces">#5 件數</option>
+    <option value="desc">#6 貨品描述</option>
+    <option value="weight">#7 重量</option>
+    <option value="unitVal">#8 單價</option>
+    <option value="totalVal">#8 總價</option>
+    <option value="btmPieces">底部合計件數</option>
+    <option value="btmWeight">底部合計重量</option>
+    <option value="btmAmount">底部合計金額</option>
+    <option value="signName">簽名欄-名稱</option>
+    <option value="signDate">簽名欄-日期</option>
+  </select>
+  <button class="btn" id="markBtn" onclick="recordPoint()">📌 標記此點</button>
+  <button class="btn" id="copyBtn" onclick="copyCode()">📋 複製程式碼</button>
+  <button class="btn" id="clearBtn" onclick="clearAll()">🗑 清除</button>
+</div>
+
+<div id="main">
+  <div id="canvasWrap">
+    <canvas id="pdfCanvas"></canvas>
+  </div>
+  <div id="sidebar">
+    <h2>已標記欄位</h2>
+    <div class="hint">在左側 PDF 上移動滑鼠，看到目標格子後點擊「📌 標記此點」</div>
+    <div id="logList"></div>
+    <div id="codeWrap">
+      <h2>生成的程式碼</h2>
+      <pre id="codeOutput">（尚未標記任何欄位）</pre>
+    </div>
+  </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.min.js"></script>
+<script>
+pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.worker.min.js';
+
+const canvas = document.getElementById('pdfCanvas');
+const ctx    = canvas.getContext('2d');
+let SCALE = 1.4;
+let pgW_pt = 0, pgH_pt = 0;
+let curX = 0, curY = 0;
+const markers = {}; // fieldId → {x, y, ratio_x, ratio_y, label}
+
+// 開啟 PDF
+document.getElementById('fileInput').addEventListener('change', async (e) => {
+  const file = e.target.files[0];
+  if (!file) return;
+  const buf  = await file.arrayBuffer();
+  const pdoc = await pdfjsLib.getDocument({data: buf}).promise;
+  const pg   = await pdoc.getPage(1);
+  const vp   = pg.getViewport({scale: SCALE});
+  canvas.width  = vp.width;
+  canvas.height = vp.height;
+  const origVp  = pg.getViewport({scale: 1});
+  pgW_pt = origVp.width;
+  pgH_pt = origVp.height;
+  await pg.render({canvasContext: ctx, viewport: vp}).promise;
+  document.getElementById('coords').textContent =
+    `PDF 尺寸: ${pgW_pt.toFixed(0)} × ${pgH_pt.toFixed(0)} pt | 移動滑鼠至格子左上角後點擊標記`;
+});
+
+// 滑鼠座標追蹤
+canvas.addEventListener('mousemove', (e) => {
+  if (!pgW_pt) return;
+  const r = canvas.getBoundingClientRect();
+  const cx = e.clientX - r.left;
+  const cy = e.clientY - r.top;
+  curX = Math.round(cx / SCALE);
+  curY = Math.round((canvas.height - cy) / SCALE); // pdf-lib Y 從底部起算
+  const rx = (cx / SCALE / pgW_pt).toFixed(3);
+  const ry = ((canvas.height - cy) / SCALE / pgH_pt).toFixed(3);
+  document.getElementById('coords').textContent =
+    `PDF pt: x=${curX}, y=${curY} | 比例: rx=${rx}, ry=${ry}`;
+});
+
+canvas.addEventListener('click', () => { if (pgW_pt) recordPoint(); });
+
+function recordPoint() {
+  if (!pgW_pt) { alert('請先開啟 PDF 模板！'); return; }
+  const sel   = document.getElementById('fieldSelect');
+  const id    = sel.value;
+  const label = sel.options[sel.selectedIndex].text;
+  const rx    = parseFloat((curX / pgW_pt).toFixed(4));
+  const ry    = parseFloat((curY / pgH_pt).toFixed(4));
+  markers[id] = { x: curX, y: curY, rx, ry, label };
+
+  // 在 canvas 上畫標記點
+  const cx = curX * SCALE;
+  const cy = canvas.height - curY * SCALE;
+  ctx.beginPath();
+  ctx.arc(cx, cy, 5, 0, Math.PI * 2);
+  ctx.fillStyle = '#e74c3c';
+  ctx.fill();
+  ctx.strokeStyle = '#fff';
+  ctx.lineWidth = 2;
+  ctx.stroke();
+  ctx.fillStyle = '#e74c3c';
+  ctx.font = 'bold 10px monospace';
+  ctx.fillText(id, cx + 7, cy - 2);
+
+  updateLog();
+  updateCode();
+}
+
+function updateLog() {
+  document.getElementById('logList').innerHTML =
+    Object.values(markers).map(m =>
+      `<div class="entry"><span class="fname">${m.label}</span>
+       <span class="coords">pt: x=${m.x}, y=${m.y} | ratio: ${m.rx} / ${m.ry}</span></div>`
+    ).join('');
+}
+
+function updateCode() {
+  const m = markers;
+  const line = (field, key, comment) =>
+    m[key] ? `    ${field}(${comment}, pgW * ${m[key].rx}, pgH * ${m[key].ry}); // ${m[key].label}\n` : '';
+  const wline = (key, comment, mw) =>
+    m[key] ? `    wrapText(${comment}, pgW * ${m[key].rx}, pgH * ${m[key].ry}, pgW * ${mw}); // ${m[key].label}\n` : '';
+
+  let code = `// ===== 精確座標（由校準工具測量）=====\n`;
+  code += line('drawField', 'awb', 'data.awb');
+  code += line('drawField', 'date', 'data.date');
+  code += line('drawField', 'seller', 'data.seller');
+  code += wline('sellerAddr', 'data.sellerAddr', '0.44');
+  code += line('drawField', 'buyer', 'data.buyer');
+  code += wline('buyerAddr', 'data.buyerAddr', '0.44');
+  code += line('drawField', 'pieces', 'data.pieces');
+  code += line('drawField', 'desc', 'data.desc');
+  code += line('drawField', 'weight', 'data.weight');
+  code += line('drawField', 'unitVal', 'data.amount');
+  code += line('drawField', 'totalVal', 'data.amount');
+  code += line('drawField', 'btmPieces', 'data.pieces');
+  code += line('drawField', 'btmWeight', 'data.weight');
+  code += line('drawField', 'btmAmount', 'data.amount');
+  code += line('drawField', 'signName', 'data.seller');
+  code += line('drawField', 'signDate', 'data.date');
+  document.getElementById('codeOutput').textContent = code || '（尚未標記任何欄位）';
+}
+
+function copyCode() {
+  const txt = document.getElementById('codeOutput').textContent;
+  navigator.clipboard.writeText(txt).then(() => alert('✅ 程式碼已複製！請貼給 AI 助手即可。'));
+}
+
+function clearAll() {
+  Object.keys(markers).forEach(k => delete markers[k]);
+  // 重繪（清除標記點）—— 需重新載入 PDF
+  alert('請重新開啟 PDF 檔案以清除所有標記點。');
+  updateLog();
+  updateCode();
+}
+</script>
+</body>
+</html>

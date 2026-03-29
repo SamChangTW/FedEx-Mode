@@ -29,15 +29,21 @@ const useFedExTpl = $("useFedExTpl");
 const tplInput = $("tplInput");
 const tplRow = $("tplRow");
 
-// === Tesseract Worker Singleton（避免每次重新建立 Worker，大幅提升重複使用效能）===
+// === Tesseract Worker Singleton（含並發保護，防止重複建立 Worker）===
 let _tesseractWorker = null;
+let _tesseractWorkerPromise = null;
+
 async function getTesseractWorker() {
-  if (!_tesseractWorker) {
+  if (_tesseractWorker) return _tesseractWorker;
+  if (_tesseractWorkerPromise) return _tesseractWorkerPromise;
+  _tesseractWorkerPromise = (async () => {
     setStatus('初始化 Tesseract OCR 引擎中（初次較慢，請稍候）...');
     _tesseractWorker = await Tesseract.createWorker('eng+chi_tra');
     console.log('[Tesseract] Worker 已建立並快取');
-  }
-  return _tesseractWorker;
+    _tesseractWorkerPromise = null;
+    return _tesseractWorker;
+  })();
+  return _tesseractWorkerPromise;
 }
 
 // 切換模板上傳列顯示狀態
@@ -62,22 +68,17 @@ function getGeminiKey() { return localStorage.getItem(GEMINI_KEY_STORAGE) || '';
 
 function updateGeminiModeLabel() {
   if (!geminiModeLabel) return;
-  const key = getGeminiKey();
-  if (key) {
-    geminiModeLabel.textContent = '\u2728 Gemini Vision \u6a21\u5f0f';
-    geminiModeLabel.style.color = '#C8B47E';
-  } else {
-    geminiModeLabel.textContent = '\ud83d\udcf7 \u672c\u5730 OCR \u6a21\u5f0f';
-    geminiModeLabel.style.color = '#aaa';
-  }
+  const hasKey = Boolean(getGeminiKey());
+  geminiModeLabel.textContent = hasKey ? '\u2728 Gemini Vision \u6a21\u5f0f' : '\ud83d\udcf7 \u672c\u5730 OCR \u6a21\u5f0f';
+  geminiModeLabel.className = `gemini-mode-label ${hasKey ? 'is-active' : 'is-inactive'}`;
 }
 
 if (btnToggleGeminiSettings) {
   btnToggleGeminiSettings.addEventListener('click', () => {
     if (!geminiSettingsPanel) return;
-    const open = geminiSettingsPanel.style.display !== 'none';
-    geminiSettingsPanel.style.display = open ? 'none' : 'block';
-    if (!open && geminiApiKeyInput) geminiApiKeyInput.value = getGeminiKey();
+    const willOpen = !geminiSettingsPanel.classList.contains('is-open');
+    if (willOpen && geminiApiKeyInput) geminiApiKeyInput.value = getGeminiKey();
+    geminiSettingsPanel.classList.toggle('is-open');
   });
 }
 if (btnSaveGeminiKey) {
@@ -85,7 +86,7 @@ if (btnSaveGeminiKey) {
     const k = geminiApiKeyInput?.value.trim();
     if (!k) { alert('\u8acb\u8f38\u5165 API Key'); return; }
     localStorage.setItem(GEMINI_KEY_STORAGE, k);
-    geminiSettingsPanel.style.display = 'none';
+    geminiSettingsPanel?.classList.remove('is-open');
     updateGeminiModeLabel();
     setStatus('\u2705 Gemini API Key \u5df2\u5132\u5b58\uff0c\u62cd\u7167\u5c07\u4f7f\u7528 Gemini Vision \u8fa8\u8b58');
   });
@@ -127,13 +128,11 @@ async function analyzeWithGeminiVision(imageDataUrl) {
   "country": "\u76ee\u7684\u5730\u570b\u5bb6\u540d\u7a31"
 }`;
 
-  // 依序嘗試多個模型，直到成功為止
+  // 依序嘗試有效模型，直到成功為止
   const MODELS_TO_TRY = [
     'v1beta/models/gemini-2.5-flash:generateContent',
-    'v1beta/models/gemini-flash-latest:generateContent',
-    'v1beta/models/gemini-3-flash-preview:generateContent',
+    'v1beta/models/gemini-2.0-flash:generateContent',
     'v1beta/models/gemini-2.0-flash-lite:generateContent',
-    'v1beta/models/gemini-2.0-flash:generateContent'
   ];
 
   let resp = null;
@@ -229,13 +228,15 @@ if (photoInput) {
         const dataUrl = canvas.toDataURL('image/jpeg', 0.85);
         const geminiData = await analyzeWithGeminiVision(dataUrl);
         fillFieldsFromGemini(geminiData);
-        rawText.value = JSON.stringify(geminiData, null, 2); // \u986f\u793a\u89e3\u6790\u7d50\u679c\u65bc\u6587\u5b57\u6846
+        rawText.value = JSON.stringify(geminiData, null, 2);
+        syncNerButtonState();
         setStatus('\u2705 Gemini Vision \u8fa8\u8b58\u5b8c\u6210\uff01\u8acb\u78ba\u8a8d\u6b04\u4f4d\u5167\u5bb9');
       } else {
         // === Tesseract OCR \u964d\u7d1a\u8def\u5f91 ===
         setStatus('\ud83d\udcf7 \u4f7f\u7528\u672c\u5730 OCR \u64f7\u53d6\u4e2d\u2026');
         const txt = await extractTextFromImage(canvas);
         rawText.value = (txt || '').trim();
+        syncNerButtonState();
         setStatus(txt && txt.trim()
           ? '\u5df2\u64f7\u53d6\u6587\u5b57\uff0c\u8acb\u6309\u300c\u4f7f\u7528\u6587\u5b57\u667a\u80fd\u5e36\u5165\uff08NER\uff09\u300d'
           : '\u672a\u64f7\u53d6\u5230\u53ef\u7528\u6587\u5b57\uff0c\u8acb\u5617\u8a66\u8f03\u6e05\u6670\u7684\u7167\u7247');
@@ -250,6 +251,12 @@ if (photoInput) {
 }
 
 function setStatus(msg) { if (textExtractStatus) textExtractStatus.textContent = msg || ''; }
+
+function setOutStatus(msg, type = '') {
+  if (!outStatus) return;
+  outStatus.textContent = msg || '';
+  outStatus.className = type ? `status-${type}` : '';
+}
 
 // Canvas 載入工具
 async function loadImageToCanvas(src) {
@@ -652,50 +659,83 @@ function fillFieldsFromEntities(ent) {
   if (pieces && ent.pieces) pieces.value = ent.pieces;
 }
 
+// NER 按鈕禁用狀態同步（有文字才可按）
+function syncNerButtonState() {
+  if (!btnRunNER) return;
+  btnRunNER.disabled = !(rawText?.value || '').trim();
+}
+if (rawText) rawText.addEventListener('input', syncNerButtonState);
+syncNerButtonState();
+
 if (btnRunNER && rawText) {
   btnRunNER.addEventListener('click', () => {
     const val = (rawText.value || '').trim();
-    if (!val) { setStatus('請先拍照'); return; }
+    if (!val) { setStatus('\u8acb\u5148\u62cd\u7167'); return; }
     const ent = parseTextWithNER(val);
     fillFieldsFromEntities(ent);
-    setStatus('已完成智能帶入。');
+    setStatus('\u5df2\u5b8c\u6210\u667a\u80fd\u5e36\u5165\u3002');
   });
 }
 
 if (btnClear) {
   btnClear.addEventListener('click', () => {
-    [awb, dateEl, seller, sellerAddr, buyer, buyerAddr, countryEl, postalCodeEl, phoneEl, desc, amount, weight, pieces, rawText].forEach(e => { if (e) e.value = ''; });
-    setStatus("");
+    [awb, dateEl, seller, sellerAddr, buyer, buyerAddr, countryEl, postalCodeEl, phoneEl, desc, amount, weight, pieces, rawText]
+      .forEach(e => { if (e) e.value = ''; });
+    setStatus('');
+    syncNerButtonState();
   });
 }
 
 // =========================================================
-// PDF 生成邏輯 (含紅框除錯 + 中文警告)
+// PDF 生成邏輯
 // =========================================================
-btnPdf.addEventListener("click", async () => {
+
+// 防抖守衛：防止重複點擊觸發多次並行生成
+let _pdfGenerating = false;
+
+btnPdf.addEventListener('click', async () => {
+  if (_pdfGenerating) return;
+  _pdfGenerating = true;
+  btnPdf.disabled = true;
+
+  // 補全收件人地址：合併郵遞區號與目的地國家（若尚未包含於地址中）
+  const postalVal  = (postalCodeEl?.value || '').trim();
+  const countryVal = (countryEl?.value || '').trim();
+  const phoneVal   = (phoneEl?.value || '').trim();
+
+  let fullBuyerAddr = (buyerAddr?.value || '').trim();
+  if (postalVal && !fullBuyerAddr.includes(postalVal)) {
+    fullBuyerAddr = fullBuyerAddr ? `${fullBuyerAddr} ${postalVal}` : postalVal;
+  }
+  if (countryVal && !fullBuyerAddr.toLowerCase().includes(countryVal.toLowerCase())) {
+    fullBuyerAddr = fullBuyerAddr ? `${fullBuyerAddr}\n${countryVal}` : countryVal;
+  }
+
+  // 補全寄件人地址：將電話號碼附加至地址末行（若尚未包含）
+  let fullSellerAddr = (sellerAddr?.value || '').trim();
+  if (phoneVal && !fullSellerAddr.includes(phoneVal)) {
+    fullSellerAddr = fullSellerAddr ? `${fullSellerAddr}\nTEL: ${phoneVal}` : `TEL: ${phoneVal}`;
+  }
+
   const data = {
-    awb: awb.value.trim(),
-    date: (dateEl.value.trim() || new Date().toISOString().slice(0, 10)),
-    seller: seller.value.trim(),
-    sellerAddr: sellerAddr.value.trim(),
-    buyer: buyer.value.trim(),
-    buyerAddr: buyerAddr.value.trim(),
-    desc: desc.value.trim(),
-    amount: amount.value,
-    weight: weight.value.trim(),
-    pieces: pieces.value.trim()
+    awb:        awb.value.trim(),
+    date:       (dateEl.value.trim() || new Date().toISOString().slice(0, 10)),
+    seller:     seller.value.trim(),
+    sellerAddr: fullSellerAddr,
+    buyer:      buyer.value.trim(),
+    buyerAddr:  fullBuyerAddr,
+    desc:       desc.value.trim(),
+    amount:     amount.value,
+    weight:     weight.value.trim(),
+    pieces:     pieces.value.trim(),
   };
 
-  outStatus.textContent = "準備生成 PDF...";
-  outStatus.style.color = "blue";
+  setOutStatus('準備生成 PDF...', 'info');
 
   const allText = Object.values(data).join('');
   const hasChinese = /[\u4e00-\u9fa5]/.test(allText);
   if (hasChinese) {
-    // 使用非阻塞的狀態列警告，避免 alert 阻塞 UI
-    outStatus.textContent = '⚠️ 偵測到中文字元！PDF 字型僅支援英文/數字，請將欄位改成英文後再生成，否則中文將顯示為「??」。';
-    outStatus.style.color = '#D9B44A';
-    // 給用戶 3 秒確認再繼續
+    setOutStatus('⚠️ 偵測到中文字元！PDF 字型僅支援英文/數字，請將欄位改成英文後再生成，否則中文將顯示為「??」。', 'warning');
     await new Promise(resolve => setTimeout(resolve, 3000));
   }
 
@@ -703,14 +743,15 @@ btnPdf.addEventListener("click", async () => {
     const { PDFDocument, StandardFonts, rgb } = PDFLib;
     let pdf = await PDFDocument.create();
     let page;
-    const wantTpl = useFedExTpl && useFedExTpl.checked;
-    const helv = await pdf.embedFont(StandardFonts.Helvetica);
-    const size = 10;
-    const DEBUG_BOX = false; // 正式版關閉紅框除錯
+    const wantTpl  = useFedExTpl && useFedExTpl.checked;
+    // 使用粗體字型，提升發票可讀性
+    const boldFont = await pdf.embedFont(StandardFonts.HelveticaBold);
+    const size     = 10;
+    const DEBUG_BOX = false;
 
     if (wantTpl) {
       let tplBytes = null;
-      let mime = "application/pdf";
+      let mime = 'application/pdf';
 
       if (tplInput && tplInput.files && tplInput.files[0]) {
         tplBytes = await tplInput.files[0].arrayBuffer();
@@ -742,7 +783,7 @@ btnPdf.addEventListener("click", async () => {
           const img = mime.includes('png') ? await pdf.embedPng(tplBytes) : await pdf.embedJpg(tplBytes);
           page.drawImage(img, { x: 0, y: 0, width: A4[0], height: A4[1] });
         }
-        outStatus.textContent = "已套用 FedEx 模板";
+        setOutStatus('已套用 FedEx 模板', 'info');
       }
     } else {
       page = pdf.addPage([595.28, 841.89]);
@@ -750,71 +791,85 @@ btnPdf.addEventListener("click", async () => {
 
     if (!page) page = pdf.addPage([595.28, 841.89]);
 
-    // 自動讀取頁面實際尺寸（適配任意 PDF）
+    // 自動讀取頁面實際尺寸（適配任意 PDF 模板）
     const { width: pgW, height: pgH } = page.getSize();
     console.log(`[PDF] 頁面尺寸: ${pgW.toFixed(1)} × ${pgH.toFixed(1)} pt`);
 
+    // 繪製單行文字（粗體，自動過濾中文為 ??）
     const drawField = (text, x, y) => {
       if (!text) return;
       const safeText = String(text).replace(/[\u4e00-\u9fa5]/g, '??');
       if (DEBUG_BOX) {
-        const textWidth = helv.widthOfTextAtSize(safeText, size);
+        const textWidth = boldFont.widthOfTextAtSize(safeText, size);
         page.drawRectangle({ x, y: y - 2, width: textWidth + 4, height: 12, borderColor: rgb(1, 0, 0), borderWidth: 1 });
       }
-      page.drawText(safeText, { x, y, size, font: helv, color: rgb(0, 0, 0) });
+      page.drawText(safeText, { x, y, size, font: boldFont, color: rgb(0, 0, 0) });
     };
 
-    // wrapText: 改用 pdf-lib 精確計算字元像素寬度，避免以字元數估算造成偏移
+    // 分段換行：先以 \n 切成硬換行段落，再對每段以字元寬度軟換行
+    // 確保 TEL/郵遞區號/國家 等附加行不會橫向溢出至其他欄位
     const wrapText = (text, x, y, maxWidth) => {
-      const words = String(text || '').split(/\s+/);
-      let line = '';
       let currentY = y;
-      for (const w of words) {
-        const candidate = line ? line + ' ' + w : w;
-        const candidateWidth = helv.widthOfTextAtSize(candidate, size);
-        if (line && candidateWidth > maxWidth) {
+      const segments = String(text || '').split('\n');
+      for (const segment of segments) {
+        const words = segment.trim().split(/\s+/).filter(Boolean);
+        if (words.length === 0) continue; // 跳過空行，不推進 Y 軸
+        let line = '';
+        for (const w of words) {
+          const candidate = line ? `${line} ${w}` : w;
+          const candidateWidth = boldFont.widthOfTextAtSize(candidate, size);
+          if (line && candidateWidth > maxWidth) {
+            drawField(line.trim(), x, currentY);
+            line = w;
+            currentY -= 13; // 軟換行行距 13pt
+          } else {
+            line = candidate;
+          }
+        }
+        if (line.trim()) {
           drawField(line.trim(), x, currentY);
-          line = w;
-          currentY -= 13; // 行距 13pt
-        } else {
-          line = candidate;
+          currentY -= 13; // 硬換行：段落結束後下移一行
         }
       }
-      if (line.trim()) drawField(line.trim(), x, currentY);
     };
 
     // ===== 精確座標（由校準工具測量）=====
-    drawField(data.awb, pgW * 0.1732, pgH * 0.9103); // #1 AWB 編號
-    drawField(data.date, pgW * 0.2254, pgH * 0.8759); // #2 出口日期
+    drawField(data.awb,    pgW * 0.1732, pgH * 0.9103); // #1 AWB 編號
+    drawField(data.date,   pgW * 0.2254, pgH * 0.8759); // #2 出口日期
     drawField(data.seller, pgW * 0.0166, pgH * 0.8181); // #3 寄件人名稱
-    wrapText(data.sellerAddr, pgW * 0.0166, pgH * 0.8039, pgW * 0.44); // #3 寄件人地址
-    drawField(data.buyer, pgW * 0.6809, pgH * 0.8315); // #4 收件人名稱
-    wrapText(data.buyerAddr, pgW * 0.4531, pgH * 0.8139, pgW * 0.44); // #4 收件人地址
+    wrapText(data.sellerAddr, pgW * 0.0166, pgH * 0.8039, pgW * 0.44); // #3 寄件人地址（含電話）
+    drawField(data.buyer,  pgW * 0.6809, pgH * 0.8315); // #4 收件人名稱
+    wrapText(data.buyerAddr,  pgW * 0.4531, pgH * 0.8139, pgW * 0.44); // #4 收件人地址（含郵遞區號/國家）
     drawField(data.pieces, pgW * 0.1791, pgH * 0.5499); // #5 件數
-    drawField(data.desc, pgW * 0.4045, pgH * 0.5516); // #6 貨品描述
+    drawField(data.desc,   pgW * 0.4045, pgH * 0.5516); // #6 貨品描述
     drawField(data.weight, pgW * 0.7189, pgH * 0.5566); // #7 重量
-    drawField(data.amount, pgW * 0.79, pgH * 0.5583); // #8 單價
+    drawField(data.amount, pgW * 0.79,   pgH * 0.5583); // #8 單價
     drawField(data.amount, pgW * 0.8707, pgH * 0.5566); // #8 總價
     drawField(data.pieces, pgW * 0.1684, pgH * 0.2355); // 底部合計件數
     drawField(data.weight, pgW * 0.7177, pgH * 0.2372); // 底部合計重量
     drawField(data.amount, pgW * 0.8553, pgH * 0.2372); // 底部合計金額
     drawField(data.seller, pgW * 0.2028, pgH * 0.1199); // 簽名欄-名稱
-    drawField(data.date, pgW * 0.7141, pgH * 0.1182); // 簽名欄-日期
+    drawField(data.date,   pgW * 0.7141, pgH * 0.1182); // 簽名欄-日期
 
     const pdfBytes = await pdf.save();
-    const blob = new Blob([pdfBytes], { type: "application/pdf" });
-    const link = document.createElement("a");
-    link.href = URL.createObjectURL(blob);
+    const blob = new Blob([pdfBytes], { type: 'application/pdf' });
+    const objectUrl = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = objectUrl;
     link.download = `FedEx_Invoice_TW_${Date.now()}.pdf`;
     link.click();
+    // 延遲釋放 Object URL，確保下載啟動後清理記憶體
+    setTimeout(() => URL.revokeObjectURL(objectUrl), 1000);
 
-    outStatus.textContent = `PDF 下載成功！(頁面: ${pgW.toFixed(0)}×${pgH.toFixed(0)}pt)`;
-    setTimeout(() => outStatus.textContent = "", 5000);
+    setOutStatus(`✅ PDF 下載成功！(${pgW.toFixed(0)}×${pgH.toFixed(0)}pt)`, 'success');
+    setTimeout(() => setOutStatus(''), 5000);
 
   } catch (e) {
     console.error(e);
-    alert("生成失敗：" + e.message);
-    outStatus.textContent = "生成錯誤";
-    outStatus.style.color = "red";
+    alert('生成失敗：' + e.message);
+    setOutStatus('⛔ 生成錯誤，請查看控制台', 'error');
+  } finally {
+    _pdfGenerating = false;
+    btnPdf.disabled = false;
   }
-});
+});
