@@ -1,33 +1,33 @@
 // v1.8-Fix Mobile (ZH-TW) — Uses "v1.7M 原始制式表格" style for PDF layout
-const $ = (id) => document.getElementById(id);
+const byId = (id) => document.getElementById(id);
 
 // UI 元件參照
-const btnCameraText = $("btnCameraText");
-const btnRunNER = $("btnRunNER");
-const photoInput = $("photoInput");
-const rawText = $("rawText");
-const textExtractStatus = $("textExtractStatus");
+const btnCameraText = byId("btnCameraText");
+const btnRunNER = byId("btnRunNER");
+const photoInput = byId("photoInput");
+const rawText = byId("rawText");
+const textExtractStatus = byId("textExtractStatus");
 
-const awb = $("awb");
-const dateEl = $("date");
-const seller = $("seller");
-const sellerAddr = $("sellerAddr");
-const buyer = $("buyer");
-const buyerAddr = $("buyerAddr");
-const desc = $("desc");
-const amount = $("amount");
-const weight = $("weight");
-const pieces = $("pieces");
-const countryEl = $("country");
-const postalCodeEl = $("postalCode");
-const phoneEl = $("phone");
+const awb = byId("awb");
+const dateEl = byId("date");
+const seller = byId("seller");
+const sellerAddr = byId("sellerAddr");
+const buyer = byId("buyer");
+const buyerAddr = byId("buyerAddr");
+const desc = byId("desc");
+const amount = byId("amount");
+const weight = byId("weight");
+const pieces = byId("pieces");
+const countryEl = byId("country");
+const postalCodeEl = byId("postalCode");
+const phoneEl = byId("phone");
 
-const btnPdf = $("btnPdf");
-const outStatus = $("outStatus");
-const btnClear = $("btnClear");
-const useFedExTpl = $("useFedExTpl");
-const tplInput = $("tplInput");
-const tplRow = $("tplRow");
+const btnPdf = byId("btnPdf");
+const outStatus = byId("outStatus");
+const btnClear = byId("btnClear");
+const useFedExTpl = byId("useFedExTpl");
+const tplInput = byId("tplInput");
+const tplRow = byId("tplRow");
 
 // === Tesseract Worker Singleton（含並發保護，防止重複建立 Worker）===
 let _tesseractWorker = null;
@@ -39,7 +39,7 @@ async function getTesseractWorker() {
   _tesseractWorkerPromise = (async () => {
     setStatus('初始化 Tesseract OCR 引擎中（初次較慢，請稍候）...');
     _tesseractWorker = await Tesseract.createWorker('eng+chi_tra');
-    console.log('[Tesseract] Worker 已建立並快取');
+    console.debug('[Tesseract] Worker 已建立並快取');
     _tesseractWorkerPromise = null;
     return _tesseractWorker;
   })();
@@ -55,21 +55,21 @@ if (useFedExTpl && tplRow) {
   syncTplRow();
 }
 
-// ===== Gemini API Key \u8a2d\u5b9a UI \u908f\u8f2f =====
+// ===== Gemini API Key 設定 UI 邏輯 =====
 const GEMINI_KEY_STORAGE = 'fedex_gemini_api_key';
-const geminiModeLabel      = $('geminiModeLabel');
-const geminiSettingsPanel  = $('geminiSettingsPanel');
-const geminiApiKeyInput    = $('geminiApiKeyInput');
-const btnToggleGeminiSettings = $('btnToggleGeminiSettings');
-const btnSaveGeminiKey     = $('btnSaveGeminiKey');
-const btnClearGeminiKey    = $('btnClearGeminiKey');
+const geminiModeLabel      = byId('geminiModeLabel');
+const geminiSettingsPanel  = byId('geminiSettingsPanel');
+const geminiApiKeyInput    = byId('geminiApiKeyInput');
+const btnToggleGeminiSettings = byId('btnToggleGeminiSettings');
+const btnSaveGeminiKey     = byId('btnSaveGeminiKey');
+const btnClearGeminiKey    = byId('btnClearGeminiKey');
 
 function getGeminiKey() { return localStorage.getItem(GEMINI_KEY_STORAGE) || ''; }
 
 function updateGeminiModeLabel() {
   if (!geminiModeLabel) return;
   const hasKey = Boolean(getGeminiKey());
-  geminiModeLabel.textContent = hasKey ? '\u2728 Gemini Vision \u6a21\u5f0f' : '\ud83d\udcf7 \u672c\u5730 OCR \u6a21\u5f0f';
+  geminiModeLabel.textContent = hasKey ? '✨ Gemini Vision 模式' : '📷 本地 OCR 模式';
   geminiModeLabel.className = `gemini-mode-label ${hasKey ? 'is-active' : 'is-inactive'}`;
 }
 
@@ -84,11 +84,11 @@ if (btnToggleGeminiSettings) {
 if (btnSaveGeminiKey) {
   btnSaveGeminiKey.addEventListener('click', () => {
     const k = geminiApiKeyInput?.value.trim();
-    if (!k) { alert('\u8acb\u8f38\u5165 API Key'); return; }
+    if (!k) { alert('請輸入 API Key'); return; }
     localStorage.setItem(GEMINI_KEY_STORAGE, k);
     geminiSettingsPanel?.classList.remove('is-open');
     updateGeminiModeLabel();
-    setStatus('\u2705 Gemini API Key \u5df2\u5132\u5b58\uff0c\u62cd\u7167\u5c07\u4f7f\u7528 Gemini Vision \u8fa8\u8b58');
+    setStatus('✅ Gemini API Key 已儲存，拍照將使用 Gemini Vision 辨識');
   });
 }
 if (btnClearGeminiKey) {
@@ -96,36 +96,36 @@ if (btnClearGeminiKey) {
     localStorage.removeItem(GEMINI_KEY_STORAGE);
     if (geminiApiKeyInput) geminiApiKeyInput.value = '';
     updateGeminiModeLabel();
-    setStatus('\u5df2\u6e05\u9664 Gemini Key\uff0c\u5c07\u6539\u7528\u672c\u5730 OCR \u6a21\u5f0f');
+    setStatus('已清除 Gemini Key，將改用本地 OCR 模式');
   });
 }
-updateGeminiModeLabel(); // \u9801\u9762\u8f09\u5165\u6642\u521d\u59cb\u5316\u6a21\u5f0f\u6a19\u793a
+updateGeminiModeLabel(); // 頁面載入時初始化模式標示
 
-// ===== Gemini Vision API \u8fa8\u8b58\u51fd\u5f0f =====
+// ===== Gemini Vision API 辨識函式 =====
 async function analyzeWithGeminiVision(imageDataUrl) {
   const apiKey = getGeminiKey();
   if (!apiKey) throw new Error('No Gemini API Key');
 
-  // \u5c07 base64 img \u91cd\u65b0\u5206\u96e2\u70ba\u7d14 data
+  // 將 base64 img 重新分離為純 data
   const base64Data = imageDataUrl.split(',')[1];
   const mimeType   = imageDataUrl.split(';')[0].split(':')[1] || 'image/jpeg';
 
-  const prompt = `\u4f60\u662f\u4e00\u500b FedEx \u63d0\u55ae\u89e3\u6790\u52a9\u624b\u3002\u8acb\u5f9e\u9019\u5f35 FedEx \u570b\u969b\u5feb\u905e\u63d0\u55ae\u5716\u7247\u4e2d\uff0c
-\u7cbe\u78ba\u63d0\u53d6\u4ee5\u4e0b\u6b04\u4f4d\u3002\u53ea\u56de\u50b3 JSON\uff0c\u4e0d\u8981\u4efb\u4f55\u5176\u4ed6\u6587\u5b57\u3002
+  const prompt = `你是一個 FedEx 提單解析助手。請從這張 FedEx 國際快遞提單圖片中，
+精確提取以下欄位。只回傳 JSON，不要任何其他文字。
 
 {
-  "awb": "\u7d14\u6578\u5b6f\u8ffd\u8e64\u78bc\uff0c12\u4f4d\u6578\u5b57\uff0c\u79fb\u9664\u7a7a\u683c(\u4f86\u81ea TRK# \u6b04\u4f4d)",
-  "shipDate": "YYYY-MM-DD \u683c\u5f0f(\u4f86\u81ea SHIP DATE:)",
-  "senderName": "\u5bc4\u4ef6\u4eba\u59d3\u540d(\u4f86\u81ea SIGN: \u6b04\u4f4d\u6700\u53ef\u9760)",
-  "senderCompany": "\u5bc4\u4ef6\u4eba\u516c\u53f8\u540d",
-  "senderAddress": "\u5bc4\u4ef6\u4eba\u5730\u5740(\u4e00\u884c)",
-  "receiverName": "\u6536\u4ef6\u4eba\u59d3\u540d(TO \u5f8c\u7b2c\u4e00\u884c)",
-  "receiverCompany": "\u6536\u4ef6\u4eba\u516c\u53f8\u540d",
-  "receiverAddress": "\u6536\u4ef6\u4eba\u5b8c\u6574\u5730\u5740",
-  "description": "\u8ca8\u54c1\u8aaa\u660e(\u4f86\u81ea DESC1:)",
-  "weight": "\u5982 0.50 KG(\u4f86\u81ea ACTWGT:)",
-  "amount": "CUSTOMS VALUE \u7684\u7d14\u6578\u5b57",
-  "country": "\u76ee\u7684\u5730\u570b\u5bb6\u540d\u7a31"
+  "awb": "純數孯追蹤碼，12位數字，移除空格(來自 TRK# 欄位)",
+  "shipDate": "YYYY-MM-DD 格式(來自 SHIP DATE:)",
+  "senderName": "寄件人姓名(來自 SIGN: 欄位最可靠)",
+  "senderCompany": "寄件人公司名",
+  "senderAddress": "寄件人地址(一行)",
+  "receiverName": "收件人姓名(TO 後第一行)",
+  "receiverCompany": "收件人公司名",
+  "receiverAddress": "收件人完整地址",
+  "description": "貨品說明(來自 DESC1:)",
+  "weight": "如 0.50 KG(來自 ACTWGT:)",
+  "amount": "CUSTOMS VALUE 的純數字",
+  "country": "目的地國家名稱"
 }`;
 
   // 依序嘗試有效模型，直到成功為止
@@ -139,22 +139,24 @@ async function analyzeWithGeminiVision(imageDataUrl) {
   let allErrors = [];
   for (const modelPath of MODELS_TO_TRY) {
     const url = `https://generativelanguage.googleapis.com/${modelPath}?key=${apiKey}`;
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 30000);
     try {
-      resp = await fetch(url,
-    {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        contents: [{
-          parts: [
-            { text: prompt },
-            { inline_data: { mime_type: mimeType, data: base64Data } }
-          ]
-        }],
-        generationConfig: { temperature: 0, responseMimeType: "application/json" }
-      })
-    }
-  );
+      resp = await fetch(url, {
+        method: 'POST',
+        signal: controller.signal,
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          contents: [{
+            parts: [
+              { text: prompt },
+              { inline_data: { mime_type: mimeType, data: base64Data } }
+            ]
+          }],
+          generationConfig: { temperature: 0, responseMimeType: "application/json" }
+        })
+      });
+      clearTimeout(timeoutId);
 
       if (resp.ok) break;
       const errText = await resp.text();
@@ -162,7 +164,9 @@ async function analyzeWithGeminiVision(imageDataUrl) {
       try { shortErr = JSON.parse(errText).error.message; } catch(e){}
       allErrors.push(`[${modelPath.split('/')[2].split(':')[0]}] ${resp.status}: ${shortErr}`);
     } catch(e) {
-      allErrors.push(`[${modelPath.split('/')[2].split(':')[0]}] Err: ${e.message}`);
+      clearTimeout(timeoutId);
+      const errMsg = e.name === 'AbortError' ? '請求逾時 (30s)' : e.message;
+      allErrors.push(`[${modelPath.split('/')[2].split(':')[0]}] Err: ${errMsg}`);
     }
   }
   if (!resp || !resp.ok) {
@@ -183,7 +187,7 @@ async function analyzeWithGeminiVision(imageDataUrl) {
 
   const json = await resp.json();
   const rawContent = json?.candidates?.[0]?.content?.parts?.[0]?.text || '';
-  // \u79fb\u9664 markdown \u4ee3\u78bc\u5340\u584a\u7b26\u865f\u518d\u89e3\u6790
+  // 移除 markdown 代碼區塊符號再解析
   const cleanJson = rawContent.replace(/```json\s*/ig, '').replace(/```/g, '').trim();
   try {
     return JSON.parse(cleanJson);
@@ -212,38 +216,38 @@ function fillFieldsFromGemini(data) {
   if (data.country)         countryEl.value    = data.country;
 }
 
-// ===== \u62cd\u7167\u6d41\u7a0b\uff1aGemini Vision \u512a\u5148\uff0c\u964d\u7d1a\u70ba Tesseract =====
+// ===== 拍照流程：Gemini Vision 優先，降級為 Tesseract =====
 if (photoInput) {
   photoInput.addEventListener("change", async (e) => {
     const file = e.target.files?.[0];
     if (!file) return;
     try {
-      setStatus('\u8b80\u53d6\u5716\u7247\u4e2d\u2026');
+      setStatus('讀取圖片中…');
       const { canvas } = await loadImageToCanvas(file);
       const apiKey = getGeminiKey();
 
       if (apiKey) {
-        // === Gemini Vision \u8def\u5f91 ===
-        setStatus('\u2728 \u4f7f\u7528 Gemini Vision \u8fa8\u8b58\u4e2d\uff0c\u8acb\u7a0d\u5019\u2026');
+        // === Gemini Vision 路徑 ===
+        setStatus('✨ 使用 Gemini Vision 辨識中，請稍候…');
         const dataUrl = canvas.toDataURL('image/jpeg', 0.85);
         const geminiData = await analyzeWithGeminiVision(dataUrl);
         fillFieldsFromGemini(geminiData);
         rawText.value = JSON.stringify(geminiData, null, 2);
         syncNerButtonState();
-        setStatus('\u2705 Gemini Vision \u8fa8\u8b58\u5b8c\u6210\uff01\u8acb\u78ba\u8a8d\u6b04\u4f4d\u5167\u5bb9');
+        setStatus('✅ Gemini Vision 辨識完成！請確認欄位內容');
       } else {
-        // === Tesseract OCR \u964d\u7d1a\u8def\u5f91 ===
-        setStatus('\ud83d\udcf7 \u4f7f\u7528\u672c\u5730 OCR \u64f7\u53d6\u4e2d\u2026');
+        // === Tesseract OCR 降級路徑 ===
+        setStatus('📷 使用本地 OCR 擷取中…');
         const txt = await extractTextFromImage(canvas);
         rawText.value = (txt || '').trim();
         syncNerButtonState();
         setStatus(txt && txt.trim()
-          ? '\u5df2\u64f7\u53d6\u6587\u5b57\uff0c\u8acb\u6309\u300c\u4f7f\u7528\u6587\u5b57\u667a\u80fd\u5e36\u5165\uff08NER\uff09\u300d'
-          : '\u672a\u64f7\u53d6\u5230\u53ef\u7528\u6587\u5b57\uff0c\u8acb\u5617\u8a66\u8f03\u6e05\u6670\u7684\u7167\u7247');
+          ? '已擷取文字，請按「使用文字智能帶入（NER）」'
+          : '未擷取到可用文字，請嘗試較清晰的照片');
       }
     } catch (err) {
       console.error(err);
-      setStatus('\u8fa8\u8b58\u5931\u6557\uff1a' + (err?.message || err));
+      setStatus('辨識失敗：' + (err?.message || err));
     } finally {
       photoInput.value = '';
     }
@@ -303,7 +307,7 @@ async function extractTextFromImage(canvas) {
         return results.map(r => r.rawValue || r.text || '').filter(Boolean).join('\n');
       }
     }
-  } catch (e) { console.log('[TextDetector] 不可用，切換至 Tesseract', e); }
+  } catch (e) { console.debug('[TextDetector] 不可用，切換至 Tesseract', e); }
 
   // 退回 Tesseract（使用 Singleton Worker，重複使用不重建）
   try {
@@ -352,7 +356,7 @@ function parseTextWithNER(text) {
   // 策略：1. 明確關鍵字 2. 從 TO 行後 8 行內找 5 6 位數 3. 全文最後出現的连續數字組
   let postalCode = '';
   // 明確關鍵字挑取
-  const postalKeyMatch = whole.match(/(?:POSTAL\s*CODE|ZIP|\u90f5\u905e\u5340\u865f)\s*[:\uff1a]?\s*(\d{3,6})\b/i);
+  const postalKeyMatch = whole.match(/(?:POSTAL\s*CODE|ZIP|郵遞區號)\s*[:：]?\s*(\d{3,6})\b/i);
   if (postalKeyMatch) {
     postalCode = postalKeyMatch[1];
   } else {
@@ -393,14 +397,14 @@ function parseTextWithNER(text) {
   }
 
   // SIGN: 欄位 — FedEx 提單的 SIGN: 直接就是寄件人姓名（最高可靠度）
-  const signMatch = whole.match(/SIGN\s*[:：]\s*([A-Za-z\u4e00-\u9fa5][A-Za-z\u4e00-\u9fa5\s.'-]{1,40})/i);
+  const signMatch = whole.match(/SIGN\s*[:：]\s*([A-Za-z一-龥][A-Za-z一-龥\s.'-]{1,40})/i);
   if (signMatch) out.senderName = signMatch[1].trim();
 
   // Weight (e.g. 5.5 KG, 10 LB)
   // Weight — 優先抓 ACTWGT（FedEx 實際重量標籤，最可靠），其次才是通用關鍵字
   const weightMatch =
-    whole.match(/ACTWGT\s*[:\uff1a]?\s*([\d.]+\s*(?:KG|KGS|LB|LBS))/i) ||
-    whole.match(/(?:ACTUAL\s*WGT|WEIGHT|WT|重量)\s*[:\uff1a]?\s*([\d.]+\s*(?:KG|KGS|LB|LBS))/i) ||
+    whole.match(/ACTWGT\s*[:：]?\s*([\d.]+\s*(?:KG|KGS|LB|LBS))/i) ||
+    whole.match(/(?:ACTUAL\s*WGT|WEIGHT|WT|重量)\s*[:：]?\s*([\d.]+\s*(?:KG|KGS|LB|LBS))/i) ||
     whole.match(/\b([\d.]+\s*(?:KG|KGS|LB|LBS))\b/i);
   if (weightMatch) out.weight = (weightMatch[1] || weightMatch[0]).toUpperCase().trim();
 
@@ -428,14 +432,18 @@ function parseTextWithNER(text) {
     'Mexico', 'MX', 'India', 'IN', 'Thailand', 'TH', 'Vietnam', 'VN',
     'Indonesia', 'ID', 'Philippines', 'PH', 'Malaysia', 'MY'
   ];
+  // 預編譯國家名稱正則，避免每行重複建立（T-1 效能優化）
+  const countryPatterns = countryList.map(c => ({
+    name: c,
+    re: new RegExp(`(^|[^A-Za-z])${c.replace(/\s+/g, '\\s+')}([^A-Za-z]|$)`, 'i')
+  }));
   // 先嘗試在 TO 區段後的行中尋找國家（優先判斷目的地）
   const toIdx = lines.findIndex(l => /^to\b/i.test(l));
   const searchLines = toIdx >= 0 ? lines.slice(toIdx, Math.min(toIdx + 10, lines.length)) : lines;
   outer:
   for (const pool of [searchLines, lines]) {
-    for (const c of countryList) {
-      const re = new RegExp(`(^|[^A-Za-z])${c.replace(/\s+/g, '\\s+')}([^A-Za-z]|$)`, 'i');
-      if (pool.some(l => re.test(l))) { out.country = c; break outer; }
+    for (const { name, re } of countryPatterns) {
+      if (pool.some(l => re.test(l))) { out.country = name; break outer; }
     }
   }
   if (!out.country) {
@@ -451,7 +459,7 @@ function parseTextWithNER(text) {
   let idxSender = lines.findIndex(l => /(?:ORIGIN\s*ID|寄件人|發件人|Sender|From|Shipper|Consignor)/i.test(l));
 
   // idxRecipient: 找「TO 姓名」開頭的行（如 "TO Thaismara Costa"），避免匹配到 BILL RECIPIENT/EIN/VAT 等標籤行
-  const idxRecipient = lines.findIndex(l => /^TO\s+[A-Za-z\u4e00-\u9fa5]/i.test(l));
+  const idxRecipient = lines.findIndex(l => /^TO\s+[A-Za-z一-龥]/i.test(l));
 
   const sliceBlock = (startIdx) => {
     if (startIdx < 0) return [];
@@ -670,10 +678,10 @@ syncNerButtonState();
 if (btnRunNER && rawText) {
   btnRunNER.addEventListener('click', () => {
     const val = (rawText.value || '').trim();
-    if (!val) { setStatus('\u8acb\u5148\u62cd\u7167'); return; }
+    if (!val) { setStatus('請先拍照'); return; }
     const ent = parseTextWithNER(val);
     fillFieldsFromEntities(ent);
-    setStatus('\u5df2\u5b8c\u6210\u667a\u80fd\u5e36\u5165\u3002');
+    setStatus('已完成智能帶入。');
   });
 }
 
@@ -733,10 +741,15 @@ btnPdf.addEventListener('click', async () => {
   setOutStatus('準備生成 PDF...', 'info');
 
   const allText = Object.values(data).join('');
-  const hasChinese = /[\u4e00-\u9fa5]/.test(allText);
+  const hasChinese = /[一-龥]/.test(allText);
   if (hasChinese) {
-    setOutStatus('⚠️ 偵測到中文字元！PDF 字型僅支援英文/數字，請將欄位改成英文後再生成，否則中文將顯示為「??」。', 'warning');
-    await new Promise(resolve => setTimeout(resolve, 3000));
+    const proceed = confirm('⚠️ 偵測到中文字元！\n\nPDF 字型僅支援英文/數字，中文將顯示為「??」。\n\n是否仍要繼續生成？');
+    if (!proceed) {
+      setOutStatus('已取消生成', 'info');
+      _pdfGenerating = false;
+      btnPdf.disabled = false;
+      return;
+    }
   }
 
   try {
@@ -793,12 +806,12 @@ btnPdf.addEventListener('click', async () => {
 
     // 自動讀取頁面實際尺寸（適配任意 PDF 模板）
     const { width: pgW, height: pgH } = page.getSize();
-    console.log(`[PDF] 頁面尺寸: ${pgW.toFixed(1)} × ${pgH.toFixed(1)} pt`);
+    console.debug(`[PDF] 頁面尺寸: ${pgW.toFixed(1)} × ${pgH.toFixed(1)} pt`);
 
     // 繪製單行文字（粗體，自動過濾中文為 ??）
     const drawField = (text, x, y) => {
       if (!text) return;
-      const safeText = String(text).replace(/[\u4e00-\u9fa5]/g, '??');
+      const safeText = String(text).replace(/[一-龥]/g, '??');
       if (DEBUG_BOX) {
         const textWidth = boldFont.widthOfTextAtSize(safeText, size);
         page.drawRectangle({ x, y: y - 2, width: textWidth + 4, height: 12, borderColor: rgb(1, 0, 0), borderWidth: 1 });
@@ -871,5 +884,13 @@ btnPdf.addEventListener('click', async () => {
   } finally {
     _pdfGenerating = false;
     btnPdf.disabled = false;
+  }
+});
+
+// T-2: 頁面關閉時清理 Tesseract Worker，釋放 WebWorker 資源
+window.addEventListener('pagehide', () => {
+  if (_tesseractWorker) {
+    _tesseractWorker.terminate().catch(() => {});
+    _tesseractWorker = null;
   }
 });

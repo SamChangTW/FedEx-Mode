@@ -9,7 +9,7 @@
   "theme_color": "#C8B47E",
   "icons": [
     {
-      "src": "assets/FedEx icon.png",
+      "src": "assets/fedex-icon.png",
       "sizes": "512x512",
       "type": "image/png",
       "purpose": "any maskable"

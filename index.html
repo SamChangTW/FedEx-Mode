@@ -9,6 +9,11 @@
   <title>FedEx 模式｜OCR 商業發票 v1.9-gemini</title>
   <link rel="manifest" href="manifest.json">
 
+  <!-- Google Fonts: Noto Sans TC (D-1) -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;700&display=swap" />
+
   <!-- 所有樣式表集中在 head，避免 FOUC（樣式閃爍）-->
   <link rel="stylesheet" href="style.css" />
   <link rel="stylesheet" href="ui/tsaa_tokens.css" />
@@ -47,37 +52,45 @@
     }
   </style>
 
+  <script src="version.js"></script>
   <script>
-    const APP_VERSION = 'v1.9-gemini';
-
     function showUpdateToast(msg) {
       const el = document.getElementById('update-toast');
       if (el) { el.textContent = msg; el.style.display = 'block'; }
     }
 
-    // 版本檢查：await 確保清除完成後才 reload，消除競態條件
+    // 版本檢查：加入最大重試次數，防止無限 reload 迴圈 (S-6)
+    const RELOAD_COUNT_KEY = 'pwa_reload_count';
+    const MAX_RELOADS = 3;
     if (localStorage.getItem('pwa_version') !== APP_VERSION) {
-      (async () => {
-        console.log('[PWA] 偵測到舊版本，開始強制清理...');
-        if ('serviceWorker' in navigator) {
-          const registrations = await navigator.serviceWorker.getRegistrations();
-          await Promise.all(registrations.map(r => r.unregister()));
-          console.log('[PWA] 舊版 SW 已全數註銷');
-        }
-        if ('caches' in window) {
-          const cacheNames = await caches.keys();
-          await Promise.all(cacheNames.map(name => caches.delete(name)));
-          console.log('[PWA] 所有舊快取已清除');
-        }
+      const reloadCount = parseInt(localStorage.getItem(RELOAD_COUNT_KEY) || '0', 10);
+      if (reloadCount >= MAX_RELOADS) {
+        console.warn('[PWA] 已達最大重試次數，跳過版本清理');
         localStorage.setItem('pwa_version', APP_VERSION);
-        showUpdateToast(`✨ 系統已更新至最新版 (${APP_VERSION})，正在重新載入…`);
-        setTimeout(() => window.location.reload(true), 1500);
-      })();
+        localStorage.removeItem(RELOAD_COUNT_KEY);
+      } else {
+        (async () => {
+          console.debug('[PWA] 偵測到舊版本，開始強制清理...');
+          localStorage.setItem(RELOAD_COUNT_KEY, String(reloadCount + 1));
+          if ('serviceWorker' in navigator) {
+            const registrations = await navigator.serviceWorker.getRegistrations();
+            await Promise.all(registrations.map(r => r.unregister()));
+          }
+          if ('caches' in window) {
+            const cacheNames = await caches.keys();
+            await Promise.all(cacheNames.map(name => caches.delete(name)));
+          }
+          localStorage.setItem('pwa_version', APP_VERSION);
+          showUpdateToast(`✨ 系統已更新至最新版 (${APP_VERSION})，正在重新載入…`);
+          setTimeout(() => window.location.reload(true), 1500);
+        })();
+      }
     } else {
+      localStorage.removeItem(RELOAD_COUNT_KEY);
       if ('serviceWorker' in navigator) {
         window.addEventListener('load', () => {
           navigator.serviceWorker.register('./sw.js')
-            .then(reg => console.log('[PWA] SW 註冊成功:', reg.scope))
+            .then(reg => console.debug('[PWA] SW 註冊成功:', reg.scope))
             .catch(err => console.error('[PWA] SW 註冊失敗:', err));
         });
       }
@@ -108,6 +121,7 @@
         <div id="geminiSettingsPanel">
           <div class="gemini-panel-inner">
             <label class="gemini-panel-label">✨ Gemini API Key（儲存於本機，不會上傳）</label>
+            <p class="gemini-privacy-notice">⚠️ 啟用 Gemini 模式後，拍攝的圖片將傳送至 Google 伺服器進行 AI 辨識。請勿拍攝含高度機密資訊的文件。</p>
             <div class="gemini-key-row">
               <input id="geminiApiKeyInput" type="password" placeholder="輸入 Gemini API Key" class="gemini-key-input" />
               <button id="btnSaveGeminiKey" type="button" class="tsaa-btn btn-sm">&#10003; 儲存</button>
@@ -126,7 +140,7 @@
         <small id="textExtractStatus" style="opacity:.8"></small>
       </div>
       <input id="photoInput" type="file" accept="image/*" capture="environment"
-        style="position:absolute;left:-9999px;width:1px;height:1px;opacity:0;" />
+        class="visually-hidden" />
       <textarea id="rawText" rows="5" placeholder="將從相片擷取的文字會顯示在此，或可直接貼上（標籤、AWB、發票或螢幕截圖文字）"></textarea>
       <small style="display:block;opacity:.7;margin-top:4px;line-height:1.4;">
         說明：有 Gemini API Key 時拍照將直接由 AI 辨識填入欄位。無 Key 時降級為本地 Tesseract OCR + NER。
@@ -136,20 +150,20 @@
     <section class="tsaa-card">
       <h2>2) 欄位確認</h2>
       <div class="grid">
-        <label>AWB 編號
-          <input id="awb" inputmode="numeric" placeholder="例如：772165000095" />
+        <label>AWB 編號 <span class="required-mark">*</span>
+          <input id="awb" inputmode="numeric" placeholder="例如：772165000095" required />
         </label>
         <label>發票日期
           <input id="date" placeholder="YYYY-MM-DD" />
         </label>
-        <label class="full">寄件人（Sender）
-          <input id="seller" placeholder="公司名稱或姓名" />
+        <label class="full">寄件人（Sender）<span class="required-mark">*</span>
+          <input id="seller" placeholder="公司名稱或姓名" required />
         </label>
         <label class="full">寄件人地址（Sender Address）
           <textarea id="sellerAddr" placeholder="街道與門牌號、城市、州/省、郵遞區號、國家" rows="2"></textarea>
         </label>
-        <label class="full">收件人（Recipient）
-          <input id="buyer" placeholder="公司名稱或姓名" />
+        <label class="full">收件人（Recipient）<span class="required-mark">*</span>
+          <input id="buyer" placeholder="公司名稱或姓名" required />
         </label>
         <label class="full">收件人地址（Recipient Address）
           <textarea id="buyerAddr" placeholder="街道與門牌號、城市、州/省、郵遞區號、國家" rows="2"></textarea>
@@ -163,8 +177,8 @@
         <label>電話（Phone）
           <input id="phone" placeholder="例如：+886 912345678" />
         </label>
-        <label class="full">貨品說明（Description）
-          <input id="desc" placeholder="例如：Paperboard Box" />
+        <label class="full">貨品說明（Description）<span class="required-mark">*</span>
+          <input id="desc" placeholder="例如：Paperboard Box" required />
         </label>
         <label>金額（Amount / USD）
           <input id="amount" type="number" step="0.01" placeholder="數字，例如：120.00" />
@@ -200,14 +214,18 @@
   </main>
 
   <footer>
-    <small>Public template · 無簽名 · 無 Logo · 僅必要欄位 · 可離線使用（PWA）</small>
+    <small>FedEx 商業發票助手 · 僅必要欄位 · 可離線使用（PWA）</small>
+    <br>
+    <small class="footer-sig">by Sam Chang</small>
   </footer>
 
-  <!-- 外部套件 -->
-  <script src="https://cdn.jsdelivr.net/npm/pdf-lib@1.17.1/dist/pdf-lib.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
+  <!-- 外部套件 (S-8: 加入 SRI integrity 防供應鏈攻擊) -->
+  <script src="https://cdn.jsdelivr.net/npm/pdf-lib@1.17.1/dist/pdf-lib.min.js" integrity="sha384-weMABwrltA6jWR8DDe9Jp5blk+tZQh7ugpCsF3JwSA53WZM9/14PjS5LAJNHNjAI" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.min.js" integrity="sha384-GJqSu7vueQ9qN0E9yLPb3Wtpd7OrgK8KmYzC8T1IysG1bcvxvIO4qtYR/D3A991F" crossorigin="anonymous"></script>
+  <!-- 版本常量 (I-1: 集中管理) -->
+  <script src="version.js"></script>
   <!-- 主邏輯 -->
-  <script src="main.js?v=gemini"></script>
+  <script src="main.js"></script>
   <!-- 主題載入（最後執行，供覆蓋 CSS 變數）-->
   <script src="ui/theme-loader.js"></script>
 </body>
