@@ -130,9 +130,9 @@ async function analyzeWithGeminiVision(imageDataUrl) {
 
   // 依序嘗試有效模型，直到成功為止
   const MODELS_TO_TRY = [
+    'v1beta/models/gemini-3.5-flash:generateContent',
     'v1beta/models/gemini-2.5-flash:generateContent',
     'v1beta/models/gemini-2.0-flash:generateContent',
-    'v1beta/models/gemini-2.0-flash-lite:generateContent',
   ];
 
   let resp = null;
