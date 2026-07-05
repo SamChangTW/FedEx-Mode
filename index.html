@@ -6,7 +6,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <meta name="description" content="拍照 OCR 智能帶入欄位，一鍵生成 FedEx 商業發票 PDF，支援離線使用（PWA）" />
   <meta name="theme-color" content="#C8B47E" />
-  <title>FedEx 模式｜OCR 商業發票 v1.9-gemini</title>
+  <title>FedEx 模式｜OCR 商業發票</title>
   <link rel="manifest" href="manifest.json">
 
   <!-- Google Fonts: Noto Sans TC (D-1) -->
@@ -18,39 +18,7 @@
   <link rel="stylesheet" href="style.css" />
   <link rel="stylesheet" href="ui/tsaa_tokens.css" />
 
-  <!-- 更新通知 Toast 樣式 -->
-  <style>
-    #update-toast {
-      display: none;
-      position: fixed;
-      top: 16px;
-      left: 50%;
-      transform: translateX(-50%);
-      background: linear-gradient(135deg, #C8B47E, #9E7F43);
-      color: #1E2A44;
-      font-weight: 700;
-      font-size: 14px;
-      padding: 12px 22px;
-      border-radius: 999px;
-      box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
-      z-index: 9999;
-      text-align: center;
-      max-width: 90vw;
-      animation: toast-in 0.3s ease;
-    }
-
-    @keyframes toast-in {
-      from {
-        opacity: 0;
-        transform: translateX(-50%) translateY(-10px);
-      }
-
-      to {
-        opacity: 1;
-        transform: translateX(-50%) translateY(0);
-      }
-    }
-  </style>
+  <!-- Toast 樣式已併入 style.css（CSS 單一樣式源） -->
 
   <script src="version.js"></script>
   <script>
@@ -101,11 +69,11 @@
 <body class="theme-scheduler tsaa-layout">
 
   <!-- 更新通知 Toast（版本更新時顯示）-->
-  <div id="update-toast"></div>
+  <div id="update-toast" role="status" aria-live="polite"></div>
 
   <header>
     <h1>商業發票（OCR）</h1>
-    <div class="sub" id="app-subtitle">v1.9-gemini · 手機版 · 鈦灰 × 香檳金</div>
+    <div class="sub" id="app-subtitle">手機版 · 鈦灰 × 香檳金</div>
   </header>
 
   <main>
@@ -116,7 +84,7 @@
       <div id="geminiSettingsBar">
         <div class="gemini-settings-header">
           <span id="geminiModeLabel" class="gemini-mode-label"></span>
-          <button id="btnToggleGeminiSettings" type="button" class="tsaa-btn btn-sm">&#9881; Gemini 設定</button>
+          <button id="btnToggleGeminiSettings" type="button" class="tsaa-btn btn-sm" aria-expanded="false" aria-controls="geminiSettingsPanel">&#9881; Gemini 設定</button>
         </div>
         <div id="geminiSettingsPanel">
           <div class="gemini-panel-inner">
@@ -132,17 +100,17 @@
         </div>
       </div>
 
-      <div class="row" style="gap:8px; align-items:center; flex-wrap:wrap;">
-        <label id="btnCameraText" for="photoInput" role="button" class="tsaa-btn">
+      <div class="row">
+        <label id="btnCameraText" for="photoInput" role="button" tabindex="0" class="tsaa-btn">
           啟動相機（拍照取文字）
         </label>
         <button id="btnRunNER" type="button" class="tsaa-btn">使用文字智能帶入（NER）</button>
-        <small id="textExtractStatus" style="opacity:.8"></small>
+        <small id="textExtractStatus" class="text-hint" role="status" aria-live="polite"></small>
       </div>
       <input id="photoInput" type="file" accept="image/*" capture="environment"
         class="visually-hidden" />
       <textarea id="rawText" rows="5" placeholder="將從相片擷取的文字會顯示在此，或可直接貼上（標籤、AWB、發票或螢幕截圖文字）"></textarea>
-      <small style="display:block;opacity:.7;margin-top:4px;line-height:1.4;">
+      <small class="form-note">
         說明：有 Gemini API Key 時拍照將直接由 AI 辨識填入欄位。無 Key 時降級為本地 Tesseract OCR + NER。
       </small>
     </section>
@@ -191,7 +159,7 @@
         </label>
       </div>
       <div class="row">
-        <button id="btnClear" type="button" class="tsaa-btn">清空欄位</button>
+        <button id="btnClear" type="button" class="tsaa-btn btn-ghost">清空欄位</button>
       </div>
     </section>
 
@@ -199,16 +167,16 @@
       <h2>3) 輸出</h2>
       <div class="row">
         <button id="btnPdf" type="button" class="tsaa-btn">生成 PDF（制式表格）</button>
-        <span id="outStatus"></span>
+        <span id="outStatus" role="status" aria-live="polite"></span>
       </div>
       <div class="row">
-        <label style="display:flex;align-items:center;gap:8px;">
+        <label class="check-row">
           <input id="useFedExTpl" type="checkbox" checked /> 使用 FedEx 官方版型（背景疊字）
         </label>
       </div>
-      <div class="row" id="tplRow" style="display:flex;gap:8px;align-items:center;">
+      <div class="row tpl-row" id="tplRow">
         <input id="tplInput" type="file" accept="image/png, image/jpeg, application/pdf" />
-        <small>可上傳模板（PDF/PNG/JPG）。若留空，將嘗試載入 assets/fedex-commercial-invoice-form-tw.pdf</small>
+        <small class="text-hint">可上傳模板（PDF/PNG/JPG）。若留空，將嘗試載入 assets/fedex-commercial-invoice-form-tw.pdf</small>
       </div>
     </section>
   </main>
@@ -222,8 +190,7 @@
   <!-- 外部套件 (S-8: 加入 SRI integrity 防供應鏈攻擊) -->
   <script src="https://cdn.jsdelivr.net/npm/pdf-lib@1.17.1/dist/pdf-lib.min.js" integrity="sha384-weMABwrltA6jWR8DDe9Jp5blk+tZQh7ugpCsF3JwSA53WZM9/14PjS5LAJNHNjAI" crossorigin="anonymous"></script>
   <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.min.js" integrity="sha384-GJqSu7vueQ9qN0E9yLPb3Wtpd7OrgK8KmYzC8T1IysG1bcvxvIO4qtYR/D3A991F" crossorigin="anonymous"></script>
-  <!-- 版本常量 (I-1: 集中管理) -->
-  <script src="version.js"></script>
+  <!-- 版本常量已於 head 載入（version.js 單源）-->
   <!-- 主邏輯 -->
   <script src="main.js"></script>
   <!-- 主題載入（最後執行，供覆蓋 CSS 變數）-->

@@ -1,4 +1,4 @@
-// v1.8-Fix Mobile (ZH-TW) — Uses "v1.7M 原始制式表格" style for PDF layout
+// FedEx OCR 商業發票主邏輯 — 版本號單源於 version.js（改版只改那一檔）；PDF 版面沿用「v1.7M 原始制式表格」校準座標
 const byId = (id) => document.getElementById(id);
 
 // UI 元件參照
@@ -79,6 +79,7 @@ if (btnToggleGeminiSettings) {
     const willOpen = !geminiSettingsPanel.classList.contains('is-open');
     if (willOpen && geminiApiKeyInput) geminiApiKeyInput.value = getGeminiKey();
     geminiSettingsPanel.classList.toggle('is-open');
+    btnToggleGeminiSettings.setAttribute('aria-expanded', String(willOpen));
   });
 }
 if (btnSaveGeminiKey) {
@@ -100,6 +101,15 @@ if (btnClearGeminiKey) {
   });
 }
 updateGeminiModeLabel(); // 頁面載入時初始化模式標示
+
+// ===== 版本顯示單源注入（改版只需改 version.js，標題與副標自動跟上）=====
+(function injectVersionLabel() {
+  const ver = (typeof APP_VERSION !== 'undefined') ? APP_VERSION : '';
+  if (!ver) return;
+  document.title = `FedEx 模式｜OCR 商業發票 ${ver}`;
+  const sub = byId('app-subtitle');
+  if (sub) sub.textContent = `${ver} · ${sub.textContent}`;
+})();
 
 // ===== Gemini Vision API 辨識函式 =====
 async function analyzeWithGeminiVision(imageDataUrl) {
@@ -125,7 +135,10 @@ async function analyzeWithGeminiVision(imageDataUrl) {
   "description": "貨品說明(來自 DESC1:)",
   "weight": "如 0.50 KG(來自 ACTWGT:)",
   "amount": "CUSTOMS VALUE 的純數字",
-  "country": "目的地國家名稱"
+  "country": "目的地國家名稱",
+  "postalCode": "收件人郵遞區號(若有)",
+  "phone": "電話號碼含國碼(若有)",
+  "pieces": "件數(來自 PKG: X of Y 的 Y，若有)"
 }`;
 
   // 依序嘗試有效模型，直到成功為止
@@ -214,6 +227,9 @@ function fillFieldsFromGemini(data) {
   if (data.weight)          weight.value       = data.weight;
   if (data.amount)          amount.value       = data.amount;
   if (data.country)         countryEl.value    = data.country;
+  if (data.postalCode)      postalCodeEl.value = data.postalCode;
+  if (data.phone)           phoneEl.value      = data.phone;
+  if (data.pieces)          pieces.value       = data.pieces;
 }
 
 // ===== 拍照流程：Gemini Vision 優先，降級為 Tesseract =====
@@ -251,6 +267,13 @@ if (photoInput) {
     } finally {
       photoInput.value = '';
     }
+  });
+}
+
+// 鍵盤無障礙：相機按鈕為 label[role=button]，補上 Enter/Space 觸發
+if (btnCameraText && photoInput) {
+  btnCameraText.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); photoInput.click(); }
   });
 }
 

@@ -13,6 +13,7 @@ const CRITICAL_ASSETS = [
   './manifest.json',
   './ui/tsaa_tokens.css',
   './ui/theme-loader.js',
+  './ui/tsaa_theme.json',
   './assets/fedex-commercial-invoice-form-tw.pdf',
   './assets/fedex-icon.png',
 ];
