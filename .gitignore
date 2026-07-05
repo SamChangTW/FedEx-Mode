@@ -7,6 +7,10 @@ Thumbs.db
 # Claude Code 本地會話配置（不入版控）
 .claude/
 
+# 本地維運文件（母 repo 為 Public，內部 SOP 不公開）
+CLAUDE.md
+MAINTENANCE.md
+
 # 過時本地快照（2026-07-05 總體檢判定：內容=HEAD 前一版，僅供比對，勿編輯勿提交）
 FedEx_Mode_v1.7M-F-W-R2_Mobile_ZH-TW/
 
