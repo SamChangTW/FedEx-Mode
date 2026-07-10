@@ -16,3 +16,6 @@ FedEx_Mode_v1.7M-F-W-R2_Mobile_ZH-TW/
 
 # 巢狀獨立 repo（SamChangTW/as-parcel-navigator，有自己的 .git 與遠端，嚴禁 git add 進母 repo）
 中研院查詢助理/
+
+# HS Code 查詢 PWA 部署鏡像（2026-07-10 另立門戶；源=Antigravity scratch，母 repo 為 Public 不收）
+HSCode查詢/
